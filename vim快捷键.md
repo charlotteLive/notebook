@@ -49,4 +49,4 @@ c         - 删除选定的块并进入插入模式
 y         - 复制选定的块
 ```
 
-![vim快捷键](C:\Users\Administrator\Desktop\vim快捷键.png)
+![vim快捷键](vim快捷键.png)
