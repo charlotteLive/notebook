@@ -358,5 +358,32 @@ sed编辑器逐行处理文件（或输入），并将结果发送到屏幕。�
    # 格式： 's/要被取代的字串/新的字串/'
    nl /etc/passwd | sed 's/root/father/'
    ```
+#### 2. awk命令
 
-5. ​
+awk是一个强大的文本分析工具，相对于grep的查找，sed的编辑，awk在其对数据分析并生成报告时，显得尤为强大。简单来说awk就是把文件逐行的读入，以空格为默认分隔符将每行切片，切开的部分再进行各种分析处理。awk有3个不同版本: awk、nawk和gawk，未作特别说明，一般指gawk，gawk 是 AWK 的 GNU 版本。
+
+**使用方法1**：`awk '{pattern + action}' {filenames}`
+
+```sh
+# 以下为log.txt文件内容
+# 2 this is a test
+# 3 Are you like awk
+# This's a test
+# 10 There are orange,apple,mongo
+
+# 每行按空格或TAB分割，输出文本中的1、4项
+ $ awk '{print $1,$4}' log.txt
+ ---------------------------------------------
+ 2 a
+ 3 like
+ This's
+ 10 orange,apple,mongo
+ # 格式化输出
+ $ awk '{printf "%-8s %-10s\n",$1,$4}' log.txt
+ ---------------------------------------------
+ 2        a
+ 3        like
+ This's
+ 10       orange,apple,mongo
+```
+
