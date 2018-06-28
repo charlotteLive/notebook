@@ -22,9 +22,172 @@ XML-RPC（RPCXML Remote Procedure Call）是通过HTTP传输XML来实现远程�
 
 其中，XMLRPC++为XML-RPC 的 C++ 实现。它提供了简单的服务器和客户机。通过使用面向对象的技术，我们可以集成这些服务器和客户机类，并实现我们自己的 XML-RPC 服务器，以将业务功能作为服务公开。这里，我们将通过XMLRPC++来实现RPC服务端。
 
-#### 1） XML-RPC组件
+#### 1） XML-RPC++
+
+XMLRPC 执行远程调用时，其输入参数与执行结果均封装在  XmlRpcValue 对象中。执行顺序如下：
+
+>  客户端 将需执行的方法，以及方法参数（XmlRpcValue）以XML格式（通过HTTP协议）传输到服务器端，服务器解析XML，获得以XmlRpcValue封装的参数，在服务器端调用方法，获得以 XmlRpcValue封装的执行结果，将其以XML格式传输至客户端，客户端解析，获得执行结果（XmlRpcValue）。
+
+也就是说，所有的数据都是 通过 XmlRpcValue 格式 进行交互。
+
+首先我们来看看XmlRpc++支持的数据类型，其支持整形、布尔类型、字符串、双精度浮点数类型、时间和base64编码的二进制数据，也支持数组数据类型和结构数据类型，可阅读文件`XmlRpcValue.h`。
+
+由于我们主要是用C++ XmlRpc做服务端，所以只需要了解以下两个类就可以了：`XmlRpcServer`，RPC服务端类；`XmlRpcServerMethod`RPC方法类。
+
+服务器支持的调用方法必须继承自` XmlRpc::XmlRpcServerMethod`，在该类的派生类对象创建时，会自动将自己注册进服务器支持的方法中。而实际的调用方法，则是重写的方法`execute(XmlRpcValue &params, XmlRpcValue &result)`，输入参数为 params,从客户端读取而获得；执行结果 放入 result，执行完毕后返回给客户端。
+
+以下为`XmlRpcServerMethod`RPC方法类的摘要：
+
+```C++
+//! Abstract class representing a single RPC method
+class XmlRpcServerMethod 
+{
+public:
+	//! Constructor
+	XmlRpcServerMethod(std::string const& name, XmlRpcServer* server = 0)
+    {
+        _name = name;
+        _server = server;
+        if (_server) _server->addMethod(this);
+    }
+	//! Destructor
+	virtual ~XmlRpcServerMethod();
+	//! Execute the method. Subclasses must provide a definition for this method.
+	virtual void execute(XmlRpcValue& params, XmlRpcValue& result) = 0;
+	//! Returns a help string for the method.
+	//! Subclasses should define this method if introspection is being used.
+	virtual std::string help() { return std::string(); }
+	//! Returns the name of the method
+	std::string& name() { return _name; }
+
+protected:
+	std::string _name;
+	XmlRpcServer* _server;
+};
+```
+
+XMLRPC服务器示例说明：
+
+```C++
+// HelloServer.cpp : Simple XMLRPC server example. Usage: HelloServer serverPort
+//
+#include "XmlRpc.h"
+#include <iostream>
+#include <stdlib.h>
+
+using namespace XmlRpc;
+
+// No arguments, result is "Hello".
+class Hello : public XmlRpcServerMethod
+{
+public:
+	Hello(XmlRpcServer* s) : XmlRpcServerMethod("Hello", s) {}
+
+	void execute(XmlRpcValue& params, XmlRpcValue& result)
+	{
+		result = "Hello";
+	}
+
+	std::string help() { return std::string("Say hello"); }
+
+};    // This constructor registers the method with the server
+
+// One argument is passed, result is "Hello, " + arg.
+class HelloName : public XmlRpcServerMethod
+{
+public:
+	HelloName(XmlRpcServer* s) : XmlRpcServerMethod("HelloName", s) {}
+
+	void execute(XmlRpcValue& params, XmlRpcValue& result)
+	{
+		std::string resultString = "Hello, ";
+		resultString += std::string(params[0]);
+		result = resultString;
+	}
+};
+
+// A variable number of arguments are passed, all doubles, result is their sum.
+class Sum : public XmlRpcServerMethod
+{
+public:
+	Sum(XmlRpcServer* s) : XmlRpcServerMethod("Sum", s) {}
+
+	void execute(XmlRpcValue& params, XmlRpcValue& result)
+	{
+		int nArgs = params.size();
+		double sum = 0.0;
+		for (int i = 0; i < nArgs; ++i)
+			sum += double(params[i]);
+		result = sum;
+	}
+};
 
 
+XmlRpcServer s;   // The server
+Hello hello(&s);  //注入方法hello
+HelloName helloName(&s);  //注入方法helloName
+Sum sum(&s);  //注入方法Sum
 
+int main()
+{
+	XmlRpc::setVerbosity(5);   //为每次调用记录日志
+	s.bindAndListen(8080);   //绑定并侦听指定的端口
+	s.enableIntrospection(true); // Enable introspection
+	s.work(-1.0);  // 启动服务器，Wait for requests indefinitely
 
+	return 0;
+}
+```
 
+### 3. Python中的RPC客户端实现
+
+类库`SimpleXMLRPCServer`一般使用在服务器端，这个模块用来构造一个最基本的XML-RPC服务器框架。
+
+`xmlrpclib`一般使用在客户端，这个模块用来调用注册在XML-RPC服务器端的函数，`xmlrpclib`并不是一个类型安全的模块，无法抵御恶意构造的数据，这方面的一些处理工作需要交给开发者自己。
+
+大致用法：使用`SimpleXMLRPCServer`模块运行XMLRPC服务器，在其中注册服务器提供的函数或者对象；然后在客户端内使用`xmlrpclib.ServerProxy`连接到服务器，想要调用服务器的函数，直接调用`ServerProxy`即可。
+
+**RPC客户端示例说明：**
+
+```python
+import xmlrpclib
+server = xmlrpclib.ServerProxy("http://localhost:8080")
+words = server.Hello()
+print "result:" + words
+```
+
+**RPC服务端示例说明：**
+
+```python
+import SimpleXMLRPCServer
+
+class MyObject:
+    def Hello(self):
+        return "hello xmlprc"
+
+obj = MyObject()
+server = SimpleXMLRPCServer.SimpleXMLRPCServer(("localhost", 8080))
+server.register_instance(obj)
+
+print "Listening on port 8080"
+server.serve_forever()
+```
+
+SimpleXMLRPCServer是一个单线程的服务器。这意味着，如果几个客户端同时发出多个请求，其它的请求就必须等待第一个请求完成以后才能继续。若修改服务器端如下，服务器就支持多线程并发了。
+
+```python
+from SimpleXMLRPCServer import SimpleXMLRPCServer
+from SocketServer import ThreadingMixIn
+class ThreadXMLRPCServer(ThreadingMixIn, SimpleXMLRPCServer):pass
+
+class MyObject:
+    def sHello(self):
+        return "hello xmlprc"
+
+obj = MyObject()
+server = ThreadXMLRPCServer(("localhost", 8080), allow_none=True)
+server.register_instance(obj)
+
+print "Listening on port 8080"
+server.serve_forever()
+```
