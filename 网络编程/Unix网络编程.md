@@ -182,7 +182,7 @@ accept函数用于受理连接请求等待队列中待处理的客户端连接�
 
 基于TCP的服务器端/客户端函数调用关系
 
-![函数调用关系](TCP函数调用关系.png)
+![函数调用关系](./pic/TCP函数调用关系.png)
 
 
 
@@ -227,7 +227,7 @@ Linux的close函数意味着完全断开连接，这不仅指无法传输数据�
 
 主机A发送完最后的数据后，调用close函数断开连接，之后主机A无法再接收主机B传输的数据。实际上，是完全无法调用与接收数据相关的函数。最终，由主机B传输的、主机A必须接收的数据也销毁了。为了解决这类问题，只关闭一部分数据交换中使用的流（Half-close）的方法应运而生。断开一部分是指，可以传输数据但无法接收，或可以接收数据但无法传输，即关闭流的一半。
 
-![](单方面断开连接.png)
+![](./pic/单方面断开连接.png)
 
 ```C++
 // howto = SHUT_RD, 断开输入流, 套接字无法接收数据, 即使输入缓冲收到数据也会抹去
@@ -262,7 +262,7 @@ struct hostent* gethostbyaddr(const char* addr, socklent_t len, int family);
 
 调用`gethostbyname`函数后返回的`hostent`结构体变量如图所示。`h_addr_list`变量可能保存着多个IP地址，因此变变量被声明为一个字符串指针数组。
 
-![](hostent结构体变量.png)
+![](./pic/hostent结构体变量.png)
 
 ### 5. 套接字的多种可选项
 
@@ -293,7 +293,7 @@ getsockopt(sock, SOL_SOCKET, SO_SNDBUF, (void*)&snd_buf, &len);
 
 原因在于，套接字经过四次握手之后并非立即消除，而是要经过一段时间的Time-wait状态。当然，只有先断开连接的主机才经过Time-wait状态。因此，若服务器端先断开连接，则无法立即重新运行。因为，套接字处于Time-wait过程时，相应端口是正在使用的状态。
 
-![](time_wait.png)
+![](./pic/time_wait.png)
 
 Time-wait主要是防止主机A向主机B传输ACK消息时，消息丢失，未能传给主机B。如果没有Time-wait状态，主机A在发送ACK消息后立即消除套接字，将导致主机B重发FIN消息也无法受到ACK消息，从而处于未正常关闭状态。因此，先传输FIN消息的主机应经过Time-wait过程。
 
