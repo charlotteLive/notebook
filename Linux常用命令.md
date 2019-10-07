@@ -110,8 +110,6 @@ $ basename /home/theseed/test/test.cpp
 test.cpp
 ```
 
-
-
 #### 10. cat指令：连接文件并显示内容
 
 cat指令用于将多个文件连接，并将结果通过标准输出显示出来。通常用于显示文本文件。
