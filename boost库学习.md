@@ -192,13 +192,92 @@ C++中的内建类型和`std::string`都满足以上三个条件，他们也是`
 
 ### 3.2 format
 
+format库实现了类似于printf的格式化对象，可以把参数格式化到一个字符串，而且是安全类型安全的。
+
+```C++
+#include <boost/format.hpp>
+using namespace boost;
+using namespace std;
+int main()
+{
+    cout << format("%s:%d+%d=%d") % "sum" % 2 % 3 % 5 << endl;
+    cout << format("(%1% + %2%) * %2% = %3%") % 2 % 3 % ((2 + 3) * 3) << endl;
+}
+```
+
 
 
 
 
 ### 3.3 string_algo
 
+`string_algo`库是一个非常全面的字符串算法库，提供了大量的字符串操作函数，如大小写无关比较、修剪、特定模式的字串查找等，可以在不使用正则表达式的情况了处理大多数字符串相关问题。
 
+`string_algo`被设计用于处理字符串，然后它的处理对象不一定是`string`或`basic_string`，可以是任何符合`boost.range`要求的容器，如标准库的`vector`、`deque`和`list`等。
+
+`string_algo`库中的算法命名遵循标准库的惯例，算法名均为小写形式，并使用不同的前缀和后缀来区分不同的版本，命名规则如下：
+
+- 前缀i：有这个前缀表明算法是大小写不敏感的，否则是大小写敏感的；
+- 后缀`_copy`：有这个后缀表明算法不变动输入，返回处理结果的拷贝，否则算法原地处理，输入即输出；
+- 后缀`_if`：这个后缀表明算法需要一个作为判断式的谓词函数对象，否则使用默认的判断准则。
+
+**1）大小写转换**
+
+```C++
+template<typename T> void to_upper(T& Input); //转为大写
+template<typename T> void to_lower(T& Input); //转为小写
+```
+
+这两个算法具有后缀为`_copy`的版本，返回变动后的结果。
+
+**2）字符串判断**
+
+- starts_with：检测一个字符串是否是另一个字符串的前缀；
+- ends_with：检测一个字符串是否是另一个字符串的后缀；
+- contains：检测一个字符串是否被另一个包含；
+- equals：检测两个字符串是否相等；
+- lexicographical_compare：根据字典顺序检测一个字符串是否小于另一个；
+- all：检测一个字符串中的所有元素是否满足指定的判断式。
+
+上述算法，除了all以外，都有一个i前缀的版本，用于进行大小写无关的字符串比较问题。
+
+**3）分类函数**
+
+`string_algo`库同时也提供了一组分类函数，可以用于检测一个字符是否符合某种特性，主要用于搭配其他算法使用，如all算法。
+
+- is_space：字符是否为空格；
+- is_alnum：字符是否为字母和数字；
+- is_alpha：字符是否为字母；
+- is_cntrl：字符是否为控制字符；
+- is_digit：字符是否为十进制数字；
+- is_xdigit：字符是否为十六进制数字；
+- is_graph：字符是否为图形字符；
+- is_lower：字符是否为小写字符；
+- is_upper：字符是否为大写字符；
+- is_print：字符是否为可打印字符；
+- is_punct：字符是否为标点符号字符；
+- is_any_of：字符是否是参数字符序列中的任意字符；
+- is_from_range：字符是否位于指定区间内，即`from <= ch <= to`。
+
+这些函数并不是真正的检测字符，而是返回类型为`detail::isClassifiedF`的函数对象，这个函数对象的operator()才是真正的分类函数。
+
+函数对象`is_classifiedF`重载了逻辑运算符`||`、`&&`和`!`，可以使用逻辑运算符把它们组合成逻辑表达式，以实现更复杂的条件判断。
+
+```C++
+inline detail::is_classifiedF is_space(const std::locale& Loc=std::locale())
+{
+    return detail::is_classifiedF(std::ctype_base::space, Loc);
+}
+
+inline detail::is_classifiedF is_alpha(const std::locale& Loc=std::locale())
+{
+    return detail::is_classifiedF(std::ctype_base::alpha, Loc);
+}
+```
+
+**4）修剪算法**
+
+`string_algo`提供了3个修剪算法：`trim_left`、`trim_right`和`trim`，用于删除字符串开头或结尾部分的空格。它有`_if`和`_copy`两种后缀，因此每个算法都有四个版本。
 
 
 
