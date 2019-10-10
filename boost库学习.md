@@ -275,9 +275,99 @@ inline detail::is_classifiedF is_alpha(const std::locale& Loc=std::locale())
 }
 ```
 
+如果`string_algo`提供的分类判断式不能满足要求，我们也可以自己实现专用的判断式。方法很简单，定义一个返回值为bool的函数对象就可以，那么最简单的就是lambda表达式了。
+
+```C++
+// 等效于判断式boost::is_any_of("01")
+auto pred_func = [] (char ch) { return ch == '0' || ch == '1';};
+str = "0101digit1010";
+cout<<trim_copy_if(str, pred_func);  //删除两边的数字
+```
+
 **4）修剪算法**
 
 `string_algo`提供了3个修剪算法：`trim_left`、`trim_right`和`trim`，用于删除字符串开头或结尾部分的空格。它有`_if`和`_copy`两种后缀，因此每个算法都有四个版本。
+
+```C++
+#include <boost/algorithm/string.hpp>
+#include <iostream>
+#include <string>
+using namespace boost;
+using namespace std;
+int main()
+{
+    string str = "   space   ";
+    cout << trim_copy(str) << endl;  //删除两边的空格
+    cout << trim_left_copy(str) << endl; //删除左边的空格
+    trim(str);
+    cout << str << endl;
+    
+    str = "..222digit222..";
+    cout<<trim_copy_if(str, is_punct() || is_digit());  //删除两边的标点和数字
+}
+```
+
+**5）替换与删除算法**
+
+- replace/erase_first：替换/删除一个字符串在输入中第一次出现的位置；
+- replace/erase_last：替换/删除一个字符串在输入中最后一次出现的位置；
+- replace/erase_nth：替换/删除一个字符串在输入中第n次出现的位置；
+- replace/erase_all  ：替换/删除一个字符串在输入中所有出现的位置；
+
+这八个算法每个都有前缀i、后缀`_copy`的组合。
+
+
+
+**6）分割与合并**
+
+split可以使用某种策略，将字符串分割成若干部分，并将分割后的字符串拷贝存入指定的容器内。join则是把存储在容器中的字符串连成一个新的字符串，并且可以指定连接的分隔符。
+
+分割与合并算法的容器的元素类型必须是`string`或`iterator_range<string::iterator>`，容器则可以是`vector`、`list`或`deque`等标准容器。算法的声明如下：
+
+```C++
+// split算法使用判断式Pred来确定分割的依据，如果字符ch满足判断式，那么他就是分隔符；
+// 参数eCompress可以取值为token_compress_off或token_compress_on,
+// token_compress_on表示多个连续的分隔符会被视为一个，token_compress_off则相反。
+template< typename SequenceSequenceT, typename RangeT, typename PredicateT >
+inline SequenceSequenceT& split(
+    SequenceSequenceT& Result,
+    RangeT& Input,
+    PredicateT Pred,
+    token_compress_mode_type eCompress=token_compress_off );
+
+// join算法可以看成split的逆运算。
+template< typename SequenceSequenceT, typename Range1T>
+inline typename range_value<SequenceSequenceT>::type  join(
+    const SequenceSequenceT& Input,
+    const Range1T& Separator);
+
+// join_if接受一个判断式，只有满足判断式的字符串才能参与合并
+template< typename SequenceSequenceT, typename Range1T, typename PredicateT>
+inline typename range_value<SequenceSequenceT>::type  join_if(
+    const SequenceSequenceT& Input,
+    const Range1T& Separator,
+    PredicateT Pred);
+```
+
+使用示例如下：
+
+```C++
+#include <boost/algorithm/string.hpp>
+#include <list>
+int main()
+{
+    std::list<std::string> str_list;
+    std::string target = "1,2,3,,,,,,4,5,6";
+    boost::split(str_list, target, boost::is_any_of(","), boost::token_compress_on);
+    for (auto& s : str_list)
+    {
+        std::cout << s << std::endl;
+    }
+
+    std::string result = boost::join(str_list, "+");
+    std::cout << result << std::endl;
+}
+```
 
 
 
