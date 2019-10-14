@@ -369,13 +369,194 @@ int main()
 }
 ```
 
+## 4. 文件系统
+
+filesystem库是一个可移植的文件系统操作库，它在底层做了大量的工作，使用POSIX标准表示文件系统的路径，使得C++具有类似脚本语言的功能，可以跨平台操作目录、文件，写出通用的脚本程序。
+
+### 4.1 路径表示
+
+filesystem库的核心类是path，它屏蔽了不同文件系统的差异，使用可移植的POSIX语法提供通用的目录及路径表示，并且支持POSIX的符号链接概念。path类摘要如下：
+
+```C++
+class path
+{
+public:
+    //创建一个空路径
+    path() BOOST_NOEXCEPT {}
+
+    //根据给定字符串创建对象
+    path(const char* s) : m_pathname(s) {}
+    path(char* s) : m_pathname(s) {}
+    path(const string& s) : m_pathname(s) {}
+    path(string& s) : m_pathname(s) {}
+    template <class InputIterator>
+    path(InputIterator begin, InputIterator end);
+
+    //添加元素到带目录分隔符的路径
+    path& operator/=(const string& s);
+    path& operator/=(const char* s);
+    path& append(const char* ptr);
+    
+    //修改路径
+    void clear() { m_pathname.clear(); }
+    void swap(path& rhs);
+    //将路径的通用格式视图中的所有目录分隔符转换成偏好目录分隔符
+    path& make_preferred();
+    //删除路径中最后的文件名，把path编程纯路径表示
+    path& remove_filename();
+    //变更文件的扩展名
+    path& replace_extension(const path& new_extension = path());
+    
+    //返回路径的原生版本
+    const string& native() const;
+    const char* c_str() const;
+    string string() const;
+    
+    //返回转换到通用的路径名格式
+    path generic_path() const;
+    string generic_string() const { return generic_path().string(); }
+    
+    //以字典序比较路径
+    int compare(const path& p) const BOOST_NOEXCEPT; 
+    int compare(const string& s) const { return compare(path(s)); }
+    int compare(const char* s) const  { return compare(path(s)); }
+    
+    //分解
+	path  root_path() const;     //若存在则返回路径的根名
+	path  root_name() const;     //若存在则返回路径的根目录
+	path  root_directory() const;//若存在则返回路径的根路径
+	path  relative_path() const; //返回相对根路径的路径
+	path  parent_path() const;   //返回亲路径的路径
+	path  filename() const;      //返回文件名
+	path  stem() const;          //返回路径所标识的文件名的主干
+    
+    //查询
+    bool empty() const;  //判断是否为空路径
+    bool filename_is_dot() const; 
+    bool filename_is_dot_dot() const;
+    bool has_root_path() const       
+    bool has_root_name() const       
+    bool has_root_directory() const  
+    bool has_relative_path() const   
+    bool has_parent_path() const     
+    bool has_filename() const        
+    bool has_extension() const       
+    bool is_relative() const         
+    bool is_absolute() const
+
+private:
+    string m_pathname;
+};
+```
+
+使用示例如下：
+
+```C++
+int main()
+{
+    boost::filesystem::path fp("/home/tony/start");
+    cout << fp << endl;  // "/home/tony/start"
+    fp /= "test.cpp";
+    cout << fp.string() << endl; // /home/tony/start/test.cpp
+    cout << fp.generic_string() << endl; // /home/tony/start/test.cpp
+    cout << fp.root_path() << endl;  // "/"
+    cout << fp.root_name() << endl;  // ""
+    cout << fp.root_directory() << endl;  // "/"
+    cout << fp.relative_path() << endl;  // "home/tony/start/test.cpp"
+    cout << fp.parent_path() << endl;  // "/home/tony/start"
+    cout << fp.filename() << endl;  // "test.cpp"
+    cout << fp.stem() << endl;  // "test"
+}
+```
+
+path的构造函数没有声明为explicit，因此字符串可以被隐式转换为path对象，这在编写代码时非常方便，可以不用创建一个临时的path对象。path重载了`operator/=`操作符，可以向使用普通路径一样用`/`来追加路径，成员函数append也有同样的功能。
+
+### 4.2 可移植的文件名
+
+需要注意的是，path仅仅用于表示路径，而并不关心路径中的文件或目录是否存在，路径也可能在当前文件系统的是无效的名字。因此，`filesystem`库提供了一系列的检查函数，来根据系统命名规则判断文件名的有效性。
+
+函数`portable_posix_name()`和`windows_name()`分别检测文件名字符串是否符合POSIX规范和Windows规范，保证名字可以移植到符合POSIX的类Unix系统和Windows系统上。POSIX规范只有一个很小的字符集用于文件名，包括大小写字母、点号、下划线和连字符；而Windows系统则范围要广一些，仅不允许`<>?:|/\`等少量字符。如：
+
+```c++
+string fname("w+abc.xxx");
+assert(!boost::filesystem::portable_posix_name(fname));  //posix非法文件名
+assert(boost::filesystem::windows_name(fname));   //Windows合法文件名
+```
+
+函数`portable_name()`则判断名字是否是一个可移植的文件名，相当于``portable_posix_name() && windows_name()`。但名字不能以点号或者连字符开头，并允许表示当前目录的`.`和父目录的`..`。
+
+`portable_directory_name()`的判断规则进一步严格，它包含`portable_name()`。并且要求名字中不能出现点号。`portable_file_name()`则要求文件名中最多有一个点号，且后缀不能超过3个字符。
+
+```C++
+assert(!boost::filesystem::portable_name("./abc.xxx"));
+assert(boost::filesystem::portable_directory_name("abcd"));  //合法目录名
+assert(boost::filesystem::portable_file_name("abc.xxx"));    //合法文件名
+```
+
+### 4.3 文件状态与属性
+
+filesystem提供了一组状态判断函数，便于我们简化对文件状态的判断：
+
+```C++
+// 路径是否存在
+bool exists(const path& p);
+// 路径是否是目录
+bool is_directory(const path& p);
+// 路径是否是普通文件
+bool is_regular_file(const path& p);
+// 路径是否是符号链接文件
+bool is_symlink(const path& p);
+// 如果path是目录，当目录中没有文件时，返回true；
+// 如果path是文件，当文件长度为0时，返回true.
+bool is_empty(const path& p);
+// 当文件存在，且不是普通文件、目录或者链接文件时，返回true
+bool is_other(const path& p);
+```
+
+受可移植性的限制，很多文件属性不是各平台共通的，因此filesystem库仅提供少量的文件属性操作：
+
+- 函数file_size()：以字节为单位返回文件的大小；
+- 函数last_write_time()：返回文件的最后修改时间，类型为`std::time_t`。
+
+这两个函数都要求操作的文件必须存在，否则会抛出异常，file_size还要求文件必须是普通文件。
+
+使用示例：
+
+```C++
+std::string fname("./test_file.txt");
+if (boost::filesystem::exists(fname))
+{
+    std::time_t t = boost::filesystem::last_write_time(fname);
+    cout << std::ctime(&t) << endl;
+
+    if (boost::filesystem::is_regular_file(fname))
+    {
+        cout << boost::filesystem::file_size(fname) << endl;
+    }
+}   
+```
+
+### 4.4 文件操作
 
 
-### 3.4 tokenizer
 
 
 
 
 
-## 4. 文件与目录操作
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
