@@ -538,11 +538,78 @@ if (boost::filesystem::exists(fname))
 
 ### 4.4 文件操作
 
+filesystem库基于path的路径表示提供了基本的文件操作函数：
 
+- create_directory和create_directories：创建目录；create_directory若目录存在，则返回false，创建成功则返回true；**create_directories可用于递归创建多级目录**。
+- rename：文件改名；
+- remove和remove_all：文件删除；remove智能删除空目录或者文件，remove_all则可以递归删除目录和文件。
+- copy、copy_file、copy_directory：文件拷贝；copy用于创建目录、文件或者符号链接；copy_directory用于复制目录；copy_file用于复制文件，可选项fail_if_exists和overwrite_if_exists，默认为fail_if_exists，即如果目标对象存在则会抛出异常。
 
+使用示例：
 
+```C++
+int main()
+{
+    boost::filesystem::path ptest = "d:/test";
+    if (exists(ptest))
+    {
+        if (boost::filesystem::is_empty(ptest))
+        {
+            boost::filesystem::remove(ptest);
+        } 
+        else
+        {
+            boost::filesystem::remove_all(ptest);
+        }
+    } 
+    boost::filesystem::create_directory(ptest);
 
+    boost::filesystem::copy_file("d:/testfile.txt", ptest / "file.txt");
+    assert(boost::filesystem::exists(ptest / "file.txt"));
+    boost::filesystem::rename(ptest / "file.txt", ptest / "file.cpp");
+    //使用create_directories一次创建多级目录
+    create_directories(ptest / "sub_dir" / "sub_dir");
+}
+```
 
+### 4.5 遍历目录
+
+filesystem库提供了directory_iterator和recursive_directory_iterator用于遍历目录下面的所有文件，directory_iterator只遍历当前目录下的所有文件，recursive_directory_iterator则能够递归遍历目录及其子目录的所有文件。
+
+directory_iterator的用法类似与string_algo库的find_iterator，通过定义一个空的directory_iterator作为end迭代器，目标目录的path对象作为迭代的起始，通过反复调用operator++即可遍历目录下的所有文件。
+
+```C++
+path target("d:/");
+// 方法1
+boost::filesystem::directory_iterator end;
+for (boost::filesystem::directory_iterator pos(target); pos !=end; ++pos)
+{
+    cout << pos->path() << endl;
+}
+
+// 方法2
+boost::filesystem::directory_iterator it(target), end;
+BOOST_FOREACH(boost::filesystem::path const &p, std::make_pair(it, end))
+{
+    cout << p << endl;
+}
+```
+
+需要注意的是，directory_iterator迭代器返回的对象并不是path，而是一个directory_entry对象，通过调用其方法path()可以获得path对象。
+
+recursive_directory_iterator能够深度搜索目录，迭代当前目录及其子目录下的所有文件。其一些成员函数可以帮助我们实现指定深度的目录遍历：
+
+- level()返回当前的目录深度m_level；当recursive_directory_iterator构造时，m_level为0，每深入一级子目录m_level加1，退出时减1。
+- pop()用于退出当前目录层次的遍历，同时m_level减1。
+- no_push()可以让目录不参与遍历，使其行为等价于directory_iterator。
+
+```C++
+boost::filesystem::recursive_directory_iterator end;
+for (boost::filesystem::recursive_directory_iterator pos("d:/test"); pos !=end; ++pos)
+{
+    cout << pos->path() << " " << pos.level()<< endl;
+}
+```
 
 
 
