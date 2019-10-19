@@ -205,10 +205,6 @@ int main()
 }
 ```
 
-
-
-
-
 ### 3.3 string_algo
 
 `string_algo`库是一个非常全面的字符串算法库，提供了大量的字符串操作函数，如大小写无关比较、修剪、特定模式的字串查找等，可以在不使用正则表达式的情况了处理大多数字符串相关问题。
@@ -610,20 +606,4 @@ for (boost::filesystem::recursive_directory_iterator pos("d:/test"); pos !=end; 
     cout << pos->path() << " " << pos.level()<< endl;
 }
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
