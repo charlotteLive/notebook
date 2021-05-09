@@ -148,3 +148,137 @@ void f()
 
 ### 2.2 向线程函数传递参数
 
+在thread的构造函数中，基本就是简单的将参数传递给给可调用对象或函数。需要注意的是，参数会默认被拷贝到线程的独立内存空间后再传递给可调用对象或者函数，不管函数需求的是参数的引用；这样做的目的是方便在新线程中进行访问。
+
+```C++
+void f(int i,std::string const& s);
+void oops(int some_param)
+{
+    char buffer[1024];
+    sprintf(buffer, "%i",some_param);
+    // buffer是指针，一个指向局部变量，该指针通过thread构造函数传递到新线程中；
+    // 在新线程传递参数给函数时，会调用string的构造函数，完成字面量到string类型的转换；
+    // 而函数oops可能会在上面转换完成前就退出了，这会导致buffer成为一个野指针，程序出现未定义的行为
+    std::thread t(f,3,buffer);
+    t.detach();
+}
+```
+
+解决方案就是在传递到`std::thread`构造函数之前就将字面值转化为`std::string`对象：
+
+```C++ 
+void f(int i,std::string const& s);
+void not_oops(int some_param)
+{
+  char buffer[1024];
+  sprintf(buffer,"%i",some_param);
+  std::thread t(f,3,std::string(buffer));  // 使用std::string，避免悬垂指针
+  t.detach();
+}
+```
+
+还可能遇到相反的情况：期望传递一个引用，但整个对象被复制了。当线程更新一个引用传递的数据结构时，这种情况就可能发生，比如：
+
+```C++
+void update_data_for_widget(widget_id w,widget_data& data); // 1
+void oops_again(widget_id w)
+{
+  widget_data data;
+  std::thread t(update_data_for_widget,w,data); // 2
+  display_status();
+  t.join();
+  process_widget_data(data); // 3
+}
+```
+
+虽然update_data_for_widget①的第二个参数期待传入一个引用，但是`std::thread`的构造函数②并不知晓；构造函数无视函数期待的参数类型，并盲目的拷贝已提供的变量。当线程调用update_data_for_widget函数时，传递给函数的参数是data变量内部拷贝的引用，而非数据本身的引用。因此，当线程结束时，内部拷贝数据将会在数据更新阶段被销毁，且process_widget_data将会接收到没有修改的data变量③。对于熟悉`std::bind`的开发者来说，问题的解决办法是显而易见的：可以使用`std::ref`将参数转换成引用的形式，从而可将线程的调用改为以下形式：
+
+```C++
+std::thread t(update_data_for_widget,w,std::ref(data));
+```
+
+在这之后，update_data_for_widget就会接收到一个data变量的引用，而非一个data变量拷贝的引用。
+
+还有一种情况，即**传递的参数只能被移动，不能被拷贝**，如`std::unique_ptr`。当原对象是一个临时变量时，移动语义会自动生效；但当原对象是一个命名变量时，那么转移的时候就需要使用`std::move()`进行显式移动。
+
+```C++
+void process_big_object(std::unique_ptr<big_object>);
+
+std::unique_ptr<big_object> p(new big_object);
+p->prepare_data(42);
+std::thread t(process_big_object,std::move(p));
+```
+
+在`std::thread`的构造函数中指定`std::move(p)`,big_object对象的所有权就被首先转移到新创建线程的的内部存储中，之后传递给process_big_object函数。
+
+### 2.3 转移线程的所有权
+
+假设你想要编写一个函数，该函数用于创建一个后台运行的线程，并且需要将新线程所有权交给函数调用方；又或者需要将线程的所有权交给需要等待其完成的函数。这些情况下，你都需要进行线程所有权转移的操作。这就是thread支持移动语义的原因。
+
+```C++
+std::thread f()
+{
+  void some_function();
+  return std::thread(some_function);
+}
+std::thread g()
+{
+  void some_other_function(int);
+  std::thread t(some_other_function,42);
+  return t;
+}
+```
+
+### 2.4 运行时决定线程数量
+
+`std::thread::hardware_concurrency()`在新版C++标准库中是一个很有用的函数。这个函数会返回能并发在一个程序中的线程数量。例如，多核系统中，返回值可以是CPU核芯的数量。返回值也仅仅是一个提示，当系统信息无法获取时，函数也会返回0。
+
+实例实现了一个并行版的`std::accumulate`。代码中将整体工作拆分成小任务交给每个线程去做，其中设置最小任务数，是为了避免产生太多的线程。程序可能会在操作数量为0的时候抛出异常。比如，`std::thread`构造函数无法启动一个执行线程，就会抛出一个异常。在这个算法中讨论异常处理，已经超出现阶段的讨论范围，这个问题我们将在第8章中再来讨论。
+
+```C++
+template<typename Iterator, typename T>
+struct accumulate_block
+{
+    void operator()(Iterator first, Iterator last, T& result)
+    {
+        result = std::accumulate(first, last, result);
+    }
+};
+template<typename Iterator, typename T>
+T parallel_accumulate(Iterator first, Iterator last, T init)
+{
+    unsigned long const length = std::distance(first, last);
+    if (!length) // 1
+        return init;
+    unsigned long const min_per_thread = 25;
+    unsigned long const max_threads =
+        (length + min_per_thread - 1) / min_per_thread; // 2
+    unsigned long const hardware_threads =
+        std::thread::hardware_concurrency();
+    unsigned long const num_threads =  // 3
+        std::min(hardware_threads != 0 ? hardware_threads : 2, max_threads);
+    unsigned long const block_size = length / num_threads; // 4
+    std::vector<T> results(num_threads);
+    std::vector<std::thread> threads(num_threads - 1);  // 5
+    Iterator block_start = first;
+    for (unsigned long i = 0; i < (num_threads - 1); ++i)
+    {
+        Iterator block_end = block_start;
+        std::advance(block_end, block_size);  // 6
+        threads[i] = std::thread(     // 7
+            accumulate_block<Iterator, T>(),
+            block_start, block_end, std::ref(results[i]));
+        block_start = block_end;  // #8
+    }
+    accumulate_block<Iterator, T>()(
+        block_start, last, results[num_threads - 1]); // 9
+    std::for_each(threads.begin(), threads.end(),
+        std::mem_fn(&std::thread::join));  // 10
+    return std::accumulate(results.begin(), results.end(), init); // 11
+}
+```
+
+函数看起来很长，但不复杂。如果输入的范围为空①，就会得到init的值。反之，如果范围内多于一个元素时，都需要用范围内元素的总数量除以线程(块)中最小任务数，从而确定启动线程的最大数量②，这样能避免无谓的计算资源的浪费。比如，一台32芯的机器上，只有5个数需要计算，却启动了32个线程。
+
+计算量的最大值和硬件支持线程数中，较小的值为启动线程的数量③。因为上下文频繁的切换会降低线程的性能，所以你肯定不想启动的线程数多于硬件支持的线程数量。当`std::thread::hardware_concurrency()`返回0，你可以选择一个合适的数作为你的选择；在本例中，我选择了”2”。你也不想在一台单核机器上启动太多的线程，因为这样反而会降低性能，有可能最终让你放弃使用并发。
+
