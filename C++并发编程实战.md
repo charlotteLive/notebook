@@ -4,82 +4,8 @@
 
 ### 2.1 线程管理基础
 
-```C++
-#include <iostream>
-#include <utility>
-#include <thread>
-#include <chrono>
- 
-void f1(int n)
-{
-    for (int i = 0; i < 5; ++i) {
-        std::cout << "Thread 1 executing\n";
-        ++n;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-}
- 
-void f2(int& n)
-{
-    for (int i = 0; i < 5; ++i) {
-        std::cout << "Thread 2 executing\n";
-        ++n;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-}
- 
-class foo
-{
-public:
-    void bar()
-    {
-        for (int i = 0; i < 5; ++i) {
-            std::cout << "Thread 3 executing\n";
-            ++n;
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-    }
-    int n = 0;
-};
- 
-class baz
-{
-public:
-    void operator()()
-    {
-        for (int i = 0; i < 5; ++i) {
-            std::cout << "Thread 4 executing\n";
-            ++n;
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-    }
-    int n = 0;
-};
- 
-int main()
-{
-    int n = 0;
-    foo f;
-    baz b;
-    std::thread t1; // t1 不是线程
-    std::thread t2(f1, n + 1); // 按值传递
-    std::thread t3(f2, std::ref(n)); // 按引用传递
-    std::thread t4(std::move(t3)); // t4 现在运行 f2() 。 t3 不再是线程
-    std::thread t5(&foo::bar, &f); // t5 在对象 f 上运行 foo::bar()
-    std::thread t6(b); // t6 在对象 b 的副本上运行 baz::operator()
-    t2.join();
-    t4.join();
-    t5.join();
-    t6.join();
-    std::cout << "Final value of n is " << n << '\n';
-    std::cout << "Final value of f.n (foo::n) is " << f.n << '\n';
-    std::cout << "Final value of b.n (baz::n) is " << b.n << '\n';
-}
-```
 
 thread对象不支持拷贝，只支持移动。线程在`std::thread`对象创建(为线程指定任务)时开始运行。启动线程后，你需要明确是要等待线程结束（join），还是让其自主运行（detach）。如果在thread对象销毁前还未作出选择，程序就会终止线程（thread的析构函数中，会调用terminate函数来终止线程）。因此，即便是有异常存在，也需要确保线程能够正确的*加入*(joined)或*分离*(detached)。
-
-
 
 如果不等待线程，就必须保证线程结束之前，可访问的数据得有效性。这不是一个新问题——单线程代码中，对象销毁之后再去访问，也会产生未定义行为——不过，线程的生命周期增加了这个问题发生的几率。这种情况很可能发生在线程还没结束，函数已经退出的时候，这时线程函数还持有函数局部变量的指针或引用。
 
@@ -322,4 +248,151 @@ bool list_contains(int value_to_find)
 ```
 
 某些情况下使用全局变量没问题，但在大多数情况下，**互斥量通常会与需要保护的数据放在同一类中**，而不是定义成全局变量。这是面向对象设计的准则：将其放在一个类中，就可让他们联系在一起，也可对类的功能进行封装，并进行数据保护。
+
+使用互斥量来保护数据，并不是仅仅在每一个成员函数中都加入一个`std::lock_guard`对象那么简单；当保护数据的指针或引用被传递出去后，这种保护就形同虚设。不过，检查指针或引用很容易，只要没有成员函数通过返回值或者输出参数的形式，向其调用者返回指向受保护数据的指针或引用，数据就是安全的。不过，也需要确保成员函数调用的函数是否把保护数据的指针或引用传递出去了。
+
+```C++
+class some_data
+{
+  int a;
+  std::string b;
+public:
+  void do_something();
+};
+class data_wrapper
+{
+private:
+  some_data data;
+  std::mutex m;
+public:
+  template<typename Function>
+  void process_data(Function func)
+  {
+    std::lock_guard<std::mutex> l(m);
+    func(data);    // 1 传递“保护”数据给用户函数
+  }
+};
+some_data* unprotected;
+void malicious_function(some_data& protected_data)
+{
+  unprotected=&protected_data;
+}
+data_wrapper x;
+void foo()
+{
+  x.process_data(malicious_function);    // 2 传递一个恶意函数
+  unprotected->do_something();    // 3 在无保护的情况下访问保护数据
+}
+```
+
+例子中process_data看起来没有任何问题，`std::lock_guard`对数据做了很好的保护，但调用用户提供的函数func①，就意味着foo能够绕过保护机制将函数`malicious_function`传递进去②，在没有锁定互斥量的情况下调用`do_something()`。
+
+这段代码的问题在于根本没有保护，只是将所有可访问的数据结构代码标记为互斥。函数`foo()`中调用`unprotected->do_something()`的代码未能被标记为互斥。这种情况下，C++线程库无法提供任何帮助，只能由开发者使用正确的互斥锁来保护数据。从乐观的角度上看，还是有方法可循的：切勿将受保护数据的指针或引用传递到互斥锁作用域之外，无论是函数返回值，还是存储在外部可见内存，亦或是以参数的形式传递到用户提供的函数中去。
+
+### 3.3 死锁：问题描述与解决方案
+
+一个给定操作需要两个或两个以上的互斥量时，另一个潜在的问题将出现：死锁。与条件竞争完全相反——不同的两个线程会互相等待，从而什么都没做。
+
+一对线程需要对他们所有的互斥量做一些操作，其中每个线程都有一个互斥量，且等待另一个解锁。这样没有线程能工作，因为他们都在等待对方释放互斥量。这种情况就是死锁，它的最大问题就是由两个或两个以上的互斥量来锁定一个操作。
+
+避免死锁的一般建议，就是让两个互斥量总以相同的顺序上锁：总在互斥量B之前锁住互斥量A，就永远不会死锁。C++标准库中提供的`std::lock`，可以一次性锁住多个的互斥量，也能够避免因上锁顺序引发的死锁问题。
+
+```C++
+class some_big_object;
+void swap(some_big_object& lhs,some_big_object& rhs);
+class X
+{
+private:
+  some_big_object some_detail;
+  std::mutex m;
+public:
+  X(some_big_object const& sd):some_detail(sd){}
+  friend void swap(X& lhs, X& rhs)
+  {
+    if(&lhs==&rhs)
+      return;
+    std::lock(lhs.m,rhs.m); // 1
+    std::lock_guard<std::mutex> lock_a(lhs.m,std::adopt_lock); // 2
+    std::lock_guard<std::mutex> lock_b(rhs.m,std::adopt_lock); // 3
+    swap(lhs.some_detail,rhs.some_detail);
+  }
+};
+```
+
+首先，检查参数是否是不同的实例，因为操作试图获取`std::mutex`对象上的锁，所以当其被获取时，结果很难预料。(一个互斥量可以在同一线程上多次上锁，标准库中`std::recursive_mutex`提供这样的功能。详情见3.3.3节)。然后，调用`std::lock()`①锁住两个互斥量，并且两个`std:lock_guard`实例已经创建好②③。提供`std::adopt_lock`参数除了表示`std::lock_guard`对象可获取锁之外，还将锁交由`std::lock_guard`对象管理，而不需要`std::lock_guard`对象再去构建新的锁。
+
+**避免死锁的一些建议：**
+
+1）**避免嵌套锁**
+
+第一个建议往往是最简单的：一个线程已获得一个锁时，再别去获取第二个。因为每个线程只持有一个锁，锁上就不会产生死锁。即使互斥锁造成死锁的最常见原因，也可能会在其他方面受到死锁的困扰(比如：线程间的互相等待)。当你需要获取多个锁，使用一个`std::lock`来做这件事(对获取锁的操作上锁)，避免产生死锁。
+
+2）**避免在持有锁时调用用户提供的代码**
+
+第二个建议是次简单的：因为代码是用户提供的，你没有办法确定用户要做什么；用户程序可能做任何事情，包括获取锁。你在持有锁的情况下，调用用户提供的代码；如果用户代码要获取一个锁，就会违反第一个指导意见，并造成死锁(有时，这是无法避免的)。当你正在写一份通用代码，例如3.2.3中的栈，每一个操作的参数类型，都在用户提供的代码中定义，就需要其他指导意见来帮助你。
+
+3）**使用固定顺序获取锁**
+
+当硬性条件要求你获取两个或两个以上的锁，并且不能使用`std::lock`单独操作来获取它们；那么最好在每个线程上，用固定的顺序获取它们(锁)。
+
+4）**使用锁的层次结构**
+
+虽然，定义锁的顺序是一种特殊情况，但锁的层次的意义在于提供对运行时约定是否被坚持的检查。这个建议需要对你的应用进行分层，并且识别在给定层上所有可上锁的互斥量。当代码试图对一个互斥量上锁，在该层锁已被低层持有时，上锁是不允许的。你可以在运行时对其进行检查，通过分配层数到每个互斥量上，以及记录被每个线程上锁的互斥量。下面的代码列表中将展示两个线程如何使用分层互斥。
+
+```C++
+hierarchical_mutex high_level_mutex(10000); // 1
+hierarchical_mutex low_level_mutex(5000);  // 2
+hierarchical_mutex other_mutex(6000); // 3
+int do_low_level_stuff();
+int low_level_func()
+{
+  std::lock_guard<hierarchical_mutex> lk(low_level_mutex); // 4
+  return do_low_level_stuff();
+}
+void high_level_stuff(int some_param);
+void high_level_func()
+{
+  std::lock_guard<hierarchical_mutex> lk(high_level_mutex); // 6
+  high_level_stuff(low_level_func()); // 5
+}
+void thread_a()  // 7
+{
+  high_level_func();
+}
+void do_other_stuff();
+void other_stuff()
+{
+  high_level_func();  // 10
+  do_other_stuff();
+}
+void thread_b() // 8
+{
+  std::lock_guard<hierarchical_mutex> lk(other_mutex); // 9
+  other_stuff();
+}
+```
+
+这里重点是使用了thread_local的值来代表当前线程的层级值：this_thread_hierarchy_value①。它被初始化为最大值⑧，所以最初所有线程都能被锁住。因为其声明中有thread_local，所以每个线程都有其拷贝副本，这样线程中变量状态完全独立，当从另一个线程进行读取时，变量的状态也完全独立。参见附录A，A.8节，有更多与thread_local相关的内容。
+
+所以，第一次线程锁住一个hierarchical_mutex时，this_thread_hierarchy_value的值是ULONG_MAX。由于其本身的性质，这个值会大于其他任何值，所以会通过check_for_hierarchy_vilation()②的检查。在这种检查方式下，lock()代表内部互斥锁已被锁住④。一旦成功锁住，你可以更新层级值了⑤。
+
+当你现在锁住另一个hierarchical_mutex时，还持有第一个锁，this_thread_hierarchy_value的值将会显示第一个互斥量的层级值。第二个互斥量的层级值必须小于已经持有互斥量检查函数②才能通过。
+
+现在，最重要的是为当前线程存储之前的层级值，所以你可以调用unlock()⑥对层级值进行保存；否则，就锁不住任何互斥量(第二个互斥量的层级数高于第一个互斥量)，即使线程没有持有任何锁。因为保存了之前的层级值，只有当持有internal_mutex③，且在解锁内部互斥量⑥之前存储它的层级值，才能安全的将hierarchical_mutex自身进行存储。这是因为hierarchical_mutex被内部互斥量的锁所保护着。为了避免无序解锁造成层次结构混乱，当解锁的互斥量不是最近上锁的那个互斥量，就需要抛出异常⑨。其他机制也能做到这点，但目前这个是最简单的。
+
+try_lock()与lock()的功能相似，除了在调用internal_mutex的try_lock()⑦失败时，不能持有对应锁，所以不必更新层级值，并直接返回false。
+
+### 3.4 嵌套锁
+
+当一个线程已经获取一个`std::mutex`时(已经上锁)，并对其再次上锁，这个操作就是错误的，并且继续尝试这样做的话，就会产生未定义行为。然而，在某些情况下，一个线程尝试获取同一个互斥量多次，而没有对其进行一次释放是可以的。之所以可以，是因为C++标准库提供了`std::recursive_mutex`类。除了可以对同一线程的单个实例上获取多个锁，其他功能与`std::mutex`相同。互斥量锁住其他线程前，必须释放拥有的所有锁，所以当调用lock()三次后，也必须调用unlock()三次。正确使用`std::lock_guard<std::recursive_mutex>`和`std::unique_lock<std::recursive_mutex>`可以帮你处理这些问题。
+
+大多数情况下，当需要嵌套锁时，就要对代码设计进行改动。嵌套锁一般用在可并发访问的类上，所以使用互斥量保护其成员数据。每个公共成员函数都会对互斥量上锁，然后完成对应的操作后再解锁互斥量。不过，有时成员函数会调用另一个成员函数，这种情况下，第二个成员函数也会试图锁住互斥量，这就会导致未定义行为的发生。“变通的”解决方案会将互斥量转为嵌套锁，第二个成员函数就能成功的进行上锁，并且函数能继续执行。
+
+但是，不推荐这样的使用方式，因为过于草率，并且不合理。特别是，当锁被持有时，对应类的不变量通常正在被修改。这意味着，当不变量正在改变的时候，第二个成员函数还需要继续执行。一个比较好的方式是，从中提取出一个函数作为类的私有成员，并且让其他成员函数都对其进行调用，这个私有成员函数不会对互斥量进行上锁(在调用前必须获得锁)。然后，你仔细考虑一下，在这种情况调用新函数时，数据的状态。
+
+
+
+
+
+
 
