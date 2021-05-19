@@ -175,7 +175,78 @@ bool list_contains(int value_to_find)
 
 #### 1.2.3 unique_lock类
 
-与 `lock_guard`相比，`unique_lock`是一个通用互斥包装器。支持延迟锁定、锁定的有时限尝试、递归锁定。
+与 `lock_guard`相比，`unique_lock`是一个通用互斥包装器。支持延迟锁定、锁定的有时限尝试、递归锁定。`unique_lock`不支持拷贝，但支持移动。
+
+```C++
+template<class Mutex>
+class unique_lock {
+public:
+    using mutex_type = Mutex;
+ 
+    // 构造/复制/销毁
+    unique_lock() noexcept;
+    explicit unique_lock(mutex_type& m);
+    unique_lock(mutex_type& m, defer_lock_t) noexcept;
+    unique_lock(mutex_type& m, try_to_lock_t);
+    unique_lock(mutex_type& m, adopt_lock_t);
+    template<class Clock, class Duration>
+      unique_lock(mutex_type& m, const chrono::time_point<Clock, Duration>& abs_time);
+    template<class Rep, class Period>
+      unique_lock(mutex_type& m, const chrono::duration<Rep, Period>& rel_time);
+    ~unique_lock();
+ 
+    unique_lock(const unique_lock&) = delete;
+    unique_lock& operator=(const unique_lock&) = delete;
+ 
+    unique_lock(unique_lock&& u) noexcept;
+    unique_lock& operator=(unique_lock&& u);
+ 
+    // 锁定
+    void lock();
+    bool try_lock();
+    template<class Rep, class Period>
+      bool try_lock_for(const chrono::duration<Rep, Period>& rel_time);
+    template<class Clock, class Duration>
+      bool try_lock_until(const chrono::time_point<Clock, Duration>& abs_time);
+    void unlock();
+ 
+    // 修改器
+    void swap(unique_lock& u) noexcept;
+    mutex_type* release() noexcept; //将关联互斥解关联而不解锁它
+ 
+    // 观察器
+    bool owns_lock() const noexcept;
+    explicit operator bool () const noexcept;
+    mutex_type* mutex() const noexcept;
+};
+```
+
+这里解释下`unique_lock`几个构造函数的参数含义：
+
+- `adopt_lock`假定线程已经占有互斥锁，构造时就不再锁定互斥了。如果使用该构造函数时，互斥没有被锁定，行为是未定义的。
+- `defer_lock`假定线程不占有互斥锁，构造时也不锁定互斥，由用户在构造后适当的时机锁定互斥；如果使用该构造函数时线程占有了互斥锁，行为是未定义的。
+- `try_to_lock`尝试锁定关联互斥而不阻塞。若当前线程已占有互斥则行为未定义，除非互斥是递归的。
+
+`unique_lock`提供了加锁解锁的用户接口，相比于`guard_lock`能够实现更细粒度的锁定，更加灵活。
+
+```C++
+void shared_print(string msg, int id) {
+    std::unique_lock<std::mutex> guard(_mu, std::defer_lock);
+    //do something 1
+
+    guard.lock();
+    // do something protected
+    guard.unlock(); //临时解锁
+
+    //do something 2
+
+    guard.lock(); //继续上锁
+    // do something 3
+    f << msg << id << endl;
+    cout << msg << id << endl;
+    // 结束时析构guard会临时解锁
+}
+```
 
 
 
@@ -184,6 +255,44 @@ bool list_contains(int value_to_find)
 `timed_mutex`类，在`mutex`的基础上增加了`try_lock_for`和`try_lock_until`方法，以支持带时限要求地获取锁的所有权。即尝试锁定互斥元，阻塞线程直到经过指定的时间段（或时间点）或得到锁，取决于何者先到来。成功获得锁时返回true ，否则返回 false 。
 
 `recursive_mutex` 类，递归锁，提供排他性递归所有权语义。可多次锁定互斥，但需要调用与锁定次数匹配的解锁操作，才能释放互斥。
+
+```C++
+class X {
+    std::recursive_mutex m;
+    std::string shared;
+  public:
+    void fun1() {
+      std::lock_guard<std::recursive_mutex> lk(m);
+      shared = "fun1";
+      std::cout << "in fun1, shared variable is now " << shared << '\n';
+    }
+    void fun2() {
+      std::lock_guard<std::recursive_mutex> lk(m);
+      shared = "fun2";
+      std::cout << "in fun2, shared variable is now " << shared << '\n';
+      fun1(); // 递归锁在此处变得有用
+      std::cout << "back in fun2, shared variable is " << shared << '\n';
+    };
+};
+ 
+int main() 
+{
+    X x;
+    std::thread t1(&X::fun1, &x);
+    std::thread t2(&X::fun2, &x);
+    t1.join();
+    t2.join();
+}
+/*
+可能的输出：
+in fun1, shared variable is now fun1
+in fun2, shared variable is now fun2
+in fun1, shared variable is now fun1
+back in fun2, shared variable is fun1
+*/
+```
+
+
 
 #### 1.2.5 死锁与死锁的解决方案
 
