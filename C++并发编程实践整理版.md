@@ -248,8 +248,6 @@ void shared_print(string msg, int id) {
 }
 ```
 
-
-
 #### 1.2.4 其他类型的互斥锁
 
 `timed_mutex`类，在`mutex`的基础上增加了`try_lock_for`和`try_lock_until`方法，以支持带时限要求地获取锁的所有权。即尝试锁定互斥元，阻塞线程直到经过指定的时间段（或时间点）或得到锁，取决于何者先到来。成功获得锁时返回true ，否则返回 false 。
@@ -292,17 +290,103 @@ back in fun2, shared variable is fun1
 */
 ```
 
-
-
 #### 1.2.5 死锁与死锁的解决方案
 
 
 
 ### 3. 条件变量
 
+C++标准库对条件变量有两套实现：`std::condition_variable`和`std::condition_variable_any`。这两个实现都包含在`<condition_variable>`头文件的声明中。两者都需要与一个互斥量一起才能工作(互斥量是为了同步)；前者仅限于与`std::mutex`一起工作，而后者可以和任何满足最低标准的互斥量一起工作，从而加上了*_any*的后缀。因为`std::condition_variable_any`更加通用，这就可能从体积、性能，以及系统资源的使用方面产生额外的开销，所以`std::condition_variable`一般作为首选的类型，当对灵活性有硬性要求时，我们才会去考虑`std::condition_variable_any`。
 
+`std::condition_variable_any`的声明如下：
 
-### 4. 同步组件
+```C++
+class condition_variable {
+public:
+    condition_variable();
+    ~condition_variable();
+
+    condition_variable(const condition_variable&) = delete;
+    condition_variable& operator=(const condition_variable&) = delete;
+
+    void notify_one() noexcept;
+    void notify_all() noexcept;
+    void wait(unique_lock<mutex>& lock);
+    template<class Pred> 
+    void wait(unique_lock<mutex>& lock, Pred pred);
+    template<class Clock, class Duration>
+    cv_status wait_until(unique_lock<mutex>& lock, const chrono::time_point<Clock, Duration>& abs_time);
+    template<class Clock, class Duration, class Pred>
+    bool wait_until(unique_lock<mutex>& lock, const chrono::time_point<Clock, Duration>& abs_time, Pred pred);
+    template<class Rep, class Period>
+    cv_status wait_for(unique_lock<mutex>& lock, const chrono::duration<Rep, Period>& rel_time);
+    template<class Rep, class Period, class Pred>
+    bool wait_for(unique_lock<mutex>& lock, const chrono::duration<Rep, Period>& rel_time, Pred pred);
+
+    using native_handle_type = /* 由实现定义 */;
+    native_handle_type native_handle();
+};
+```
+
+wait/wait_for/wait_until会阻塞当前线程，直到条件变量被唤醒，或到指定时间后。这三个方法抖可以**传入条件判断，用于在等待特定条件为true时忽略虚假唤醒**。等效于`while(!pred())  wait(lock);`。执行wait时，会原子地解锁lock，阻塞当前线程；直到收到notify_all() 或 notify_one() 时解除阻塞，解除阻塞后，lock会再次锁定且wait退出。**调用wait前，需保证线程已获取到锁**，否则行为时未定义的。
+
+示例程序如下：
+
+```C++
+std::mutex m;
+std::condition_variable cv;
+std::string data;
+bool ready = false;
+bool processed = false;
+
+void worker_thread()
+{
+    // 等待直至 main() 发送数据
+    std::unique_lock<std::mutex> lk(m);
+    cv.wait(lk, [] {return ready; });
+
+    // 等待后，我们占有锁。
+    std::cout << "Worker thread is processing data\n";
+    data += " after processing";
+
+    // 发送数据回 main()
+    processed = true;
+    std::cout << "Worker thread signals data processing completed\n";
+
+    // 通知前完成手动解锁，以避免等待线程才被唤醒就阻塞（细节见 notify_one ）
+    lk.unlock();
+    cv.notify_one();
+}
+
+int main()
+{
+    std::thread worker(worker_thread);
+
+    data = "Example data";
+    // 发送数据到 worker 线程
+    {
+        std::lock_guard<std::mutex> lk(m);
+        ready = true;
+        std::cout << "main() signals data ready for processing\n";
+    }
+    cv.notify_one();
+
+    // 等候 worker
+    {
+        std::unique_lock<std::mutex> lk(m);
+        cv.wait(lk, [] {return processed; });
+    }
+    std::cout << "Back in main(), data = " << data << '\n';
+
+    worker.join();
+}
+```
+
+上面的代码，我们注意到在调用wait之前锁定互斥元时，都是使用的`unique_lock`而不是`guard_lock`。在wait的检查条件不满足时，wait将解锁互斥元，并将该线程置于阻塞或等待状态。当收到notify（其他线程调用notify_one或notify_all）时，线程将从睡眠中唤醒，重新锁定互斥元，并再次检查条件。如果条件满足，就从wait返回；如果条件不满足，再次解锁互斥元，并恢复等待（既虚假唤醒）。因为在等待期间需要加锁解锁操作，所以需要选择更加灵活的`unique_lock`。
+
+### 4. Future相关组件
+
+标准库提供了一些工具来获取异步任务（即在单独的线程中启动的函数）的返回值，并捕捉其所抛出的异常。这些值在共享状态中传递，其中异步任务可以写入其返回值或存储异常，而且可以由持有该引用该共享态的 `std::future `或 `std::shared_future `实例的线程检验、等待或是操作这个状态。
 
 
 
