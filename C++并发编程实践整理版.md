@@ -386,7 +386,51 @@ int main()
 
 ### 4. Future相关组件
 
+#### 4.1 future
+
 标准库提供了一些工具来获取异步任务（即在单独的线程中启动的函数）的返回值，并捕捉其所抛出的异常。这些值在共享状态中传递，其中异步任务可以写入其返回值或存储异常，而且可以由持有该引用该共享态的 `std::future `或 `std::shared_future `实例的线程检验、等待或是操作这个状态。
+
+类模板 `std::future` 提供访问异步操作结果的机制，不支持拷贝，支持移动。主要有两个常用方法：
+
+- get：等待直至future拥有合法结果并获取它，等效于调用wait等待结果。调用get后将释放共享状态，valid()返回false。
+- wait/wait_for/wait_until：阻塞直至结果变得可用。若调用此函数前 `valid() == false` ，则行为未定义。
+
+```C++
+int main()
+{
+    // 来自 packaged_task 的 future
+    std::packaged_task<int()> task([](){ return 7; }); // 包装函数
+    std::future<int> f1 = task.get_future();  // 获取 future
+    std::thread(std::move(task)).detach(); // 在线程上运行
+ 
+    // 来自 async() 的 future
+    std::future<int> f2 = std::async(std::launch::async, [](){ return 8; });
+ 
+    // 来自 promise 的 future
+    std::promise<int> p;
+    std::future<int> f3 = p.get_future();
+    std::thread( [&p]{ p.set_value_at_thread_exit(9); }).detach();
+ 
+    std::cout << "Waiting..." << std::flush;
+    f1.wait();
+    f2.wait();
+    f3.wait();
+    std::cout << "Done!\nResults are: "
+              << f1.get() << ' ' << f2.get() << ' ' << f3.get() << '\n';
+}
+```
+
+#### 4.2 async
+
+函数模板 `async` 异步地运行函数 `f` （潜在地在可能是线程池一部分的分离线程中），并返回最终将保有该函数调用结果的` std::future`。
+
+asnyc的第一个参数，可以传入`std::launch::async`，表示异步求值，即调用函数后就运行线程开始执行任务；也可以传入`std::launch::deferred`表示惰性求值，即调用方线程上首次请求其结果时才开始执行任务。
+
+#### 4.3 packaged_task
+
+
+
+#### 4.4 promise
 
 
 
