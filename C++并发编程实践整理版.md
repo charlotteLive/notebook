@@ -294,7 +294,7 @@ back in fun2, shared variable is fun1
 
 
 
-### 3. 条件变量
+### 1.3 条件变量
 
 C++标准库对条件变量有两套实现：`std::condition_variable`和`std::condition_variable_any`。这两个实现都包含在`<condition_variable>`头文件的声明中。两者都需要与一个互斥量一起才能工作(互斥量是为了同步)；前者仅限于与`std::mutex`一起工作，而后者可以和任何满足最低标准的互斥量一起工作，从而加上了*_any*的后缀。因为`std::condition_variable_any`更加通用，这就可能从体积、性能，以及系统资源的使用方面产生额外的开销，所以`std::condition_variable`一般作为首选的类型，当对灵活性有硬性要求时，我们才会去考虑`std::condition_variable_any`。
 
@@ -384,9 +384,9 @@ int main()
 
 上面的代码，我们注意到在调用wait之前锁定互斥元时，都是使用的`unique_lock`而不是`guard_lock`。在wait的检查条件不满足时，wait将解锁互斥元，并将该线程置于阻塞或等待状态。当收到notify（其他线程调用notify_one或notify_all）时，线程将从睡眠中唤醒，重新锁定互斥元，并再次检查条件。如果条件满足，就从wait返回；如果条件不满足，再次解锁互斥元，并恢复等待（既虚假唤醒）。因为在等待期间需要加锁解锁操作，所以需要选择更加灵活的`unique_lock`。
 
-### 4. Future相关组件
+### 1.4. Future相关组件
 
-#### 4.1 future
+#### 1.4.1 future
 
 标准库提供了一些工具来获取异步任务（即在单独的线程中启动的函数）的返回值，并捕捉其所抛出的异常。这些值在共享状态中传递，其中异步任务可以写入其返回值或存储异常，而且可以由持有该引用该共享态的 `std::future `或 `std::shared_future `实例的线程检验、等待或是操作这个状态。
 
@@ -420,21 +420,126 @@ int main()
 }
 ```
 
-#### 4.2 async
+#### 1.4.2 async
 
 函数模板 `async` 异步地运行函数 `f` （潜在地在可能是线程池一部分的分离线程中），并返回最终将保有该函数调用结果的` std::future`。
 
 asnyc的第一个参数，可以传入`std::launch::async`，表示异步求值，即调用函数后就运行线程开始执行任务；也可以传入`std::launch::deferred`表示惰性求值，即调用方线程上首次请求其结果时才开始执行任务。
 
-#### 4.3 packaged_task
+#### 1.4.3 packaged_task
+
+std::packaged_task 包装一个可调用的对象，并且允许异步获取该可调用对象产生的结果，从包装可调用对象意义上来讲，std::packaged_task 与 std::function 类似，只不过 std::packaged_task 将其包装的可调用对象的执行结果传递给一个 std::future 对象（该对象通常在另外一个线程中获取 std::packaged_task 任务的执行结果）。
+
+std::packaged_task 对象内部包含了两个最基本元素：1）被包装的任务(stored task)，任务(task)是一个可调用的对象，如函数指针、成员函数指针或者函数对象；2）共享状态(shared state)，用于保存任务的返回值，可以通过 std::future 对象来达到异步访问共享状态的效果。可以通过 std::packged_task::get_future 来获取与共享状态相关联的 std::future 对象。在调用该函数之后，两个对象共享相同的共享状态，具体解释如下：
+
+- std::packaged_task 对象是异步 Provider，它在某一时刻通过调用被包装的任务来设置共享状态的值。
+- std::future 对象是一个异步返回对象，通过它可以获得共享状态的值，当然在必要的时候需要等待共享状态标志变为 ready.
+
+std::packaged_task 的共享状态的生命周期一直持续到最后一个与之相关联的对象被释放或者销毁为止。下面一个小例子大致讲了 std::packaged_task 的用法：
+
+```C++
+// count down taking a second for each value:
+int countdown (int from, int to) {
+    for (int i=from; i!=to; --i) {
+        std::cout << i << '\n';
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    std::cout << "Finished!\n";
+    return from - to;
+}
+
+int main ()
+{
+    std::packaged_task<int(int,int)> task(countdown); // 设置 packaged_task
+    std::future<int> ret = task.get_future(); // 获得与 packaged_task 共享状态相关联的 future 对象.
+
+    std::thread th(std::move(task), 10, 0);   //创建一个新线程完成计数任务.
+
+    int value = ret.get();                    // 等待任务完成并获取结果.
+
+    std::cout << "The countdown lasted for " << value << " seconds.\n";
+
+    th.join();
+    return 0;
+}
+```
+
+`packaged_task`常用方法：
+
+- valid()：检查对象是否拥有共享状态。拥有则返回true，否则为false。
+- get_future()：返回与对象共享同一共享状态的future。
+- operator()：执行函数。
+- reset()：重置状态，抛弃先前执行的结果。
+
+```C++
+int main()
+{
+    std::packaged_task<int(int,int)> task([](int a, int b) {
+        return std::pow(a, b);
+    });
+    std::future<int> result = task.get_future();
+    task(2, 9);
+    std::cout << "2^9 = " << result.get() << '\n';
+ 
+    task.reset();
+    result = task.get_future();
+    std::thread task_td(std::move(task), 2, 10);
+    task_td.join();
+    std::cout << "2^10 = " << result.get() << '\n';
+}
+```
+
+#### 1.4.4 promise
+
+promise 对象可以保存某一类型 T 的值，该值可被 future 对象读取（可能在另外一个线程中），因此 promise 也提供了一种线程同步的手段。在 promise 对象构造时可以和一个共享状态（通常是std::future）相关联，并可以在相关联的共享状态(std::future)上保存一个类型为 T 的值。注意 `std::promise` 只应当使用一次。
+
+可以通过 get_future 来获取与该 promise 对象相关联的 future 对象，调用该函数之后，两个对象共享相同的共享状态(shared state)
+
+- promise 对象是异步 Provider，它可以在某一时刻设置共享状态的值。
+- future 对象可以异步返回共享状态的值，或者在必要的情况下阻塞调用者并等待共享状态标志变为 ready，然后才能获取共享状态的值。
+
+```C++
+void accumulate(std::vector<int>::iterator first,
+                std::vector<int>::iterator last,
+                std::promise<int> accumulate_promise)
+{
+    int sum = std::accumulate(first, last, 0);
+    accumulate_promise.set_value(sum);  // 提醒 future
+}
+ 
+void do_work(std::promise<void> barrier)
+{
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    barrier.set_value();
+}
+ 
+int main()
+{
+    // 演示用 promise<int> 在线程间传递结果。
+    std::vector<int> numbers = { 1, 2, 3, 4, 5, 6 };
+    std::promise<int> accumulate_promise;
+    std::future<int> accumulate_future = accumulate_promise.get_future();
+    std::thread work_thread(accumulate, numbers.begin(), numbers.end(),
+                            std::move(accumulate_promise));
+ 
+    // future::get() 将等待直至该 future 拥有合法结果并取得它
+    // 无需在 get() 前调用 wait()
+    //accumulate_future.wait();  // 等待结果
+    std::cout << "result=" << accumulate_future.get() << '\n';
+    work_thread.join();  // wait for thread completion
+ 
+    // 演示用 promise<void> 在线程间对状态发信号
+    std::promise<void> barrier;
+    std::future<void> barrier_future = barrier.get_future();
+    std::thread new_work_thread(do_work, std::move(barrier));
+    barrier_future.wait();
+    new_work_thread.join();
+}
+```
 
 
 
-#### 4.4 promise
-
-
-
-### 5. 原子变量
+### 1.5 原子操作与原子类型
 
 
 
