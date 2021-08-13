@@ -27,6 +27,9 @@ project(hello_cmake VERSION 1.0)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 11)
 
+# 设置编译选项
+add_compile_options(-Wno-unused-variable -Wno-unused-function -fno-builtin)
+
 # #如果没有指定则设置默认编译方式为RelWithDebInfo
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 	message("Setting build type to 'RelWithDebInfo' as none was specified.")
@@ -36,6 +39,9 @@ endif()
 # 生成静态库, 添加头文件查找目录
 add_library(hello_library STATIC src/Hello.cpp)
 target_include_directories(hello_library PUBLIC ${PROJECT_SOURCE_DIR}/include)
+
+# 设置可执行文件的输出路径
+set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}) 
 
 # 生成可执行文件, 链接可执行文件和静态库
 add_executable(hello_binary src/main.cpp)
@@ -61,4 +67,110 @@ cmake函数讲解：
   - Debug - 添加`-g`编译选项，可调试但文件体积大。
   - MinSizeRel - 添加`-Os -DNDEBUG`编译选项，最小体积版本。
   - RelWithDebInfo - 添加`-O2 -g -DNDEBUG`，有代码优化同时可调试。
+
+### 2. cmake变量
+
+CMake中变量的类型有多种：通过set设置的普通变量和缓存变量、环境变量、数组变量等等，由于CMake在生成的过程中会加载缓存的关系，因此用法不一样。
+
+常用的变量设置语法：
+
+```
+set(<variable> <value>
+    [[CACHE <type> <docstring> [FORCE]] | PARENT_SCOPE])
+```
+
+#### 2.1 普通变量
+
+普通变量（normal variable）相当于编程中脚本内部变量，类似于脚本文件的局部变量，这种变量不能跨越CMakeLists.txt文档。普通变量定义方式如下：
+
+```
+set(var "value")
+```
+
+设置一个普通变量var，值为value，引号的作用可以详见我的另一篇文章。
+
+和编程语言中局部变量的用法类似，这个变量会屏蔽CMake缓存中的同名变量，（类似局部变量屏蔽全局变量）。但是这条语句不会改变缓存中的var变量。
+
+#### 2.2 缓存变量
+
+cache variable用于缓存变量，定义如下：
+
+```
+set(var "value" CACHE STRING "" FORCE)
+```
+
+这条语句设置了一个CACHE语句，类型是STRING，说明信息为空字符串，上述都不能省略。
+
+**还有一种方法能够设置CACHE变量，就是通过cmake命令的-D选项，可以添加一个CACHE变量。**
+
+CACHE作用如下：
+
+- 如果缓存中存在同名的变量，根据FORCE来决定是否写入缓存：如果没有FORCE，这条语句不起作用，使用缓存中的变量；如果有FORCE，使用当前设置的值。
+  - 注意，如果是FORCE，也能修改-D选项设置的CACHE变量，所以有可能传入的生成命令选项是无效的。
+- 如果缓存中不存在同名的变量，则将这个变量写入缓存并使用。
+
+缓存变量也可以设置只在本文件内生效，将STRING类型改为INTERNAL即可。
+
+#### 2.3 环境变量
+
+- 读取环境变量：`$ENV{...}`
+- 设置环境变量：`set(ENV{...} ...)`
+
+
+#### 2.4 总结
+
+正常使用的时候，如果有多层CMakeLists.txt，需要跨文本的变量，应该使用CACHE类型，如果只是当前文本的变量，则不需要使用CACHE，更重要的是，应该避免使用同名的普通和缓存变量。另外，由于CMake没有有效的清除缓存的方法，如果要彻底清除缓存，需要删除build或者release文件夹的所有文件。
+
+
+
+### 3. 包含第三方库
+
+
+
+
+
+### 5. 附录
+
+#### 5.1 target_include_directories、include_directories的区别
+
+include_directories的影响范围最大，可以为CMakelists.txt后的所有项目添加头文件目录，一般写在最外层CMakelists.txt中影响全局。
+
+target_include_directories的影响范围可以自定义。如加关键子PRIVATE或这PUBLIC。**一般引用库路径使用这个命令**，作为外部依赖项引入进来，target是自己项目生成的lib。
+
+```cmake
+include_directories(include/ffmpeg)
+
+project(myLib)
+target_include_directories(myLib PRIVATE ${OpenCV_Include_dir})
+```
+
+`link_directories`和`target_link_directories`同理。
+
+#### 5.2 设置编译选项的讲究
+
+在cmake脚本中，设置编译选项可以通过`add_compile_options`命令，也可以通过set命令修改`CMAKE_CXX_FLAGS`或`CMAKE_C_FLAGS`。
+
+使用这两种方式在有的情况下效果是一样的，但请注意它们还是有区别的：`add_compile_options`命令添加的编译选项是针对所有编译器的(包括c和c++编译器)，而set命令设置`CMAKE_C_FLAGS`或`CMAKE_CXX_FLAGS`变量则是分别只针对c和c++编译器的。
+
+使用`add_compile_options`添加`-std=c++11`选项，是想在编译c++代码时加上c++11支持选项。但是因为`add_compile_options`是针对所有类型编译器的，所以在编译c代码时，就会产生如下warning。
+
+```cmake
+#判断编译器类型,如果是gcc编译器,则在编译选项中加入c++11支持
+if(CMAKE_COMPILER_IS_GNUCXX)
+    set(CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}")
+    message(STATUS "optional:-std=c++11")   
+endif(CMAKE_COMPILER_IS_GNUCXX)
+```
+
+此外，还有`add_definitions`也可以用于添加编译选项，但实际使用过程中，常用它来添加`-D`的宏定义选项。这样我们就不需要修改源码，就能通过编译选项来控制源码中宏的开闭。
+
+```cmake
+# cmake .. -DTEST_DEBUG=ON
+option(TEST_DEBUG "option for debug" OFF)
+if (TEST_DEBUG) 
+	add_definitions(-DTEST_DEBUG)
+endif(TEST_DEBUG)
+```
+
+
 
