@@ -121,17 +121,126 @@ CACHE作用如下：
 
 正常使用的时候，如果有多层CMakeLists.txt，需要跨文本的变量，应该使用CACHE类型，如果只是当前文本的变量，则不需要使用CACHE，更重要的是，应该避免使用同名的普通和缓存变量。另外，由于CMake没有有效的清除缓存的方法，如果要彻底清除缓存，需要删除build或者release文件夹的所有文件。
 
-
-
 ### 3. 包含第三方库
 
+#### 3.1 方法一：通过link_directories和include_directories设置库文件和头文件的路径
+
+```cmake
+include_directories(path_to_OpenBLAS/include/) # 头文件的路径
+link_directories(path_to_OpenBLAS/lib/) # .a文件的路径
+add_executable(Test_lib library.c)
+target_link_libraries(Test_lib libopenblas.a)
+```
+
+
+
+#### 3.2 方法二：使用find_package自动查找库文件和头文件的路径
+
+```cmake
+add_executable(Test_lib library.c)
+set(OpenBLAS_DIR "/path to .camke文件")
+find_package(OpenBLAS REQUIRED)
+include_directories(${OpenBLAS_INCLUDE_DIRS})
+target_link_libraries(Test_lib ${OpenBLAS_LIBRARIES})
+```
+
+.cmake一般会由第三方库自动生成，去安装路径寻找。里面包含的是库文件和头文件的路径设置。
+
+为了方便我们在项目中引入外部依赖包，cmake官方为我们预定义了许多寻找依赖包的Module，他们存储在`path_to_your_cmake/share/cmake-<version>/Modules`目录下。每个以`Find<LibaryName>.cmake`命名的文件都可以帮我们找到一个包。找到对应的包后，cmake会给我们提供以下几个变量：
+
+- XX_FOUND - 系统是否有XX库；
+- XX_INCULDE_DIR - XX库的头文件目录；
+- XX_LIBRARIES - XX库的库文件目录；
+- XX_DEFINITIONS - XX库需要的编译选项。
+
+如果cmake里没有对应库的`Find<LibaryName>.cmake`文件，我们也可以自己写一个。
+
+```cmake
+#  JSONC_FOUND - System has json-c
+#  JSONC_INCLUDE_DIRS - The json-c include directories
+#  JSONC_LIBRARIES - The libraries needed to use json-c
+#  JSONC_DEFINITIONS - Compiler switches required for using json-c
+
+find_package(PkgConfig)
+pkg_check_modules(PC_JSONC QUIET json-c)
+set(JSONC_DEFINITIONS ${PC_JSONC_CFLAGS_OTHER})
+
+find_path(JSONC_INCLUDE_DIR json.h
+          HINTS ${PC_JSONC_INCLUDEDIR} ${PC_JSONC_INCLUDE_DIRS}
+          PATH_SUFFIXES json-c)
+
+find_library(JSONC_LIBRARY NAMES json-c libjson-c
+             HINTS ${PC_JSONC_LIBDIR} ${PC_JSONC_LIBRARY_DIRS})
+
+find_library(JSONC_LIBRARY NAMES json-c libjson-c
+             HINTS ${PC_JSON-C_LIBDIR} ${PC_JSON-C_LIBRARY_DIRS})
+
+include(FindPackageHandleStandardArgs)
+# handle the QUIETLY and REQUIRED arguments and set JSONC_FOUND to TRUE
+# if all listed variables are TRUE
+find_package_handle_standard_args(JSONC DEFAULT_MSG
+                                  JSONC_LIBRARY JSONC_INCLUDE_DIR)
+
+if (NOT JSONC_FOUND)
+
+  message(FATAL_ERROR "Json-C is Required!\n")
+
+endif (NOT JSONC_FOUND)
+
+mark_as_advanced(JSONC_INCLUDE_DIR JSONC_LIBRARY)
+
+set(JSONC_LIBRARIES    ${JSONC_LIBRARY})
+set(JSONC_INCLUDE_DIRS ${JSONC_INCLUDE_DIR})
+```
+
+#### 3.3 方法三：通过find_library直接设置库文件和头文件的路径
+
+```cmake
+include_directories(/path to OpenBLAS/include/)
+find_library(OPENBLAS NAMES OpenBLAS PATHS /path to OpenBLAS/lib/ NO_DEFAULT_PATH)
+add_executable(Test_lib library.c)
+target_link_libraries(Test_lib ${OPENBLAS})
+```
+
+`find_library`用于查找库的位置，其用法如下：
+
+```cmake
+find_library(var NAMES name1 PATHS path [REQUIRED] [NO_DEFUALT_PATH])
+```
+
+- NAMES用于指定库可能的名字；
+- HINTS和PATHS作用相同，用于指定查找库的路径；
+- REQUIRED说明这个库是必须的，没有找到则产生一个错误信息；
+- NO_DEFUALT_PATH用于说明除了指定的路径外，不再查找额外的路径。
+
+还有其他的关键字，可以查看官方的说明文档。
+
+### 4. 多层次cmake
+
+CMakeLists.txt文件可以通过`add_subdirectory`包含和调用包含CMakeLists.txt文件的子目录。
+
+```cmake
+add_subdirectory(sublibrary1)
+add_subdirectory(sublibrary2)
+add_subdirectory(subbinary)
+```
+
+使用project（）命令创建项目时，CMake将自动创建许多变量，这些变量可用于引用有关该项目的详细信息。 这些变量然后可以由其他子项目或主项目使用。 例如，要引用您可以使用的其他项目的源目录。
+
+- PROJECT_NAME：当前project函数设置的项目名称；
+- CMAKE_PROJECT_NAME：有project设置的第一个项目的名称，即顶层项目；
+- PROJECT_SOURCE_DIR：当前项目的源文件目录；
+- PROJECT_BINARY_DIR：当前项目的构建目录。
+
+### 5. 代码生成
 
 
 
 
-### 5. 附录
 
-#### 5.1 target_include_directories、include_directories的区别
+### 6. 附录
+
+#### 6.1 target_include_directories、include_directories的区别
 
 include_directories的影响范围最大，可以为CMakelists.txt后的所有项目添加头文件目录，一般写在最外层CMakelists.txt中影响全局。
 
@@ -146,7 +255,7 @@ target_include_directories(myLib PRIVATE ${OpenCV_Include_dir})
 
 `link_directories`和`target_link_directories`同理。
 
-#### 5.2 设置编译选项的讲究
+#### 6.2 设置编译选项的讲究
 
 在cmake脚本中，设置编译选项可以通过`add_compile_options`命令，也可以通过set命令修改`CMAKE_CXX_FLAGS`或`CMAKE_C_FLAGS`。
 
