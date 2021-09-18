@@ -341,3 +341,51 @@ funWithParam 1 2 3 4 5 6 7 8 9 34 73
 
 
 
+### 6. shell脚本编程经典实例
+
+#### 6.1 无人值守下运行耗时作业
+
+如果想在后台运行作业并在该作业完成前退出 shell，那就需要对作业使用 nohup。
+
+```bash
+root@ubuntu:~$ nohup tail -f examples.desktop &
+[1] 2812
+root@ubuntu:~$ nohup: ignoring input and appending output to 'nohup.out'
+```
+
+将作业置入后台时，它仍旧是 bash shell 的子进程。如果退出 shell 的某个实例，bash 就会向其所有子进程发送 hangup 信号。这就是作业运行不了多久的原因。只要退出bash，后台作业就会被“杀死”。
+
+nohup 命令只是设置子进程忽略 hangup 信号。你仍可以用 kill 命令“杀死”作业，因为 kill 发送的是 SIGTERM 信号，而非 SIGHUP 信号。但有了 nohup，作业就不会在退出 bash 时被无意间“杀死”。
+
+nohup 会替你重定向输出，将其追加（不是覆盖，而是添加到文件现有内容的末尾）到当前目录下的 nohup.out 文件中。你也可以明确地在命令行上指定将输出重定向到其他地方。
+
+#### 6.2 减少if语句的数量
+
+在 bash 中使用` && `运算符，根据条件执行命令。
+
+```bash
+cd mytmp && rm * -rf
+```
+
+用 `&& `分隔两个命令，以此告诉 bash 先执行第一个命令，如果该命令成功（退出状态为 0），再执行第二个命令。这非常类似于用 if 语句检查第一个命令的退出状态，从而判断是否执行第二个命令。
+
+与`&&`类似，`||`表示前一个命令执行失败后，才执行后面的命令，通常用于故障时显示错误信息。
+
+```bash
+cmd || printf "%b" "cmd failed."
+```
+
+警告！千万别被下面这条语句骗了。
+
+```shell
+cmd || printf "%b" "cmd failed.";exit 1
+```
+
+exit无论如何都不会执行！`||` 仅作用于前两个命令。如果只想在 cmd 出错时执行 exit，那么要将其与 printf 分组到一起，以便两者被视为一个单元。语法如下所示：
+
+```bash
+cmd || { printf "%b" "cmd failed.";exit 1; }
+```
+
+注意，最后一个命令必须以分号结尾，闭合花括号与其中的内容之间要用空白字符分隔。
+
