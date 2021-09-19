@@ -222,6 +222,24 @@ done
 
 in列表是可选的，如果不用它，for循环使用命令行的位置参数。
 
+**bash 2.04 版开始引入一种 for 循环的变体，语法与 C 语言类似**。其一般形式如下所示。
+
+```bash
+for (( expr1 ; expr2 ; expr3 ))
+do
+	list
+done
+```
+
+双括号表明这是算术表达式，在其中引用变量时，不用加 $（但 $1 等位置参数除外），只要是 bash 中出现双括号的地方，均是如此。该表达式是整数表达式，可以使用包括逗号（用于在一个表达式中放入多个操作）在内的大量运算符。
+
+```bash
+for (( i=0, j=0 ; i+j < 10 ; i++, j++ ))
+do
+	echo $((i*j))
+done
+```
+
 #### 3.3 while语句
 
 ```bash
@@ -413,3 +431,84 @@ FILE_DIR=${1:-/tmp}
 FILE_DIR=${1:? "Error, you must supply a scratch directory."}
 ```
 
+#### 6.3 在shell脚本中执行算术操作
+
+用` $(( )) `或` let` 进行整数运算。
+
+```bash
+COUNT=$((COUNT + 5 + MAX + 2))
+let COUNT+='5+MAX+2'
+```
+
+$(( )) 表达式内不需要使用空格，不过在运算符和操作数两边加上空格也无妨。但是 = 两边绝不能出现空格，这和 bash 变量赋值的规则一样。
+
+另外，确保给 let 的表达式加上引号，因为 let 语句是 bash 内建的，其参数要经过单词扩展。
+
+另一个怪异之处是，通常出现在 shell 变量前表示取值的 `$ `符号（如` $COUNT` 或`$MAX`）在双括号内部是不需要的。但如果用到了位置参数（如 `$2`），那么` $ `还是少不了的，因为只有这样才能区分位置参数与数字常量
+
+let 语句和` $(( ))` 语法的另一处重要区别在于两者处理空白字符（空格字符）的方式不同。对 let 语句来说，要么添加引号，要么赋值运算符（=）和其他运算符两边不能出现空格。必须将运算符和操作数放在一起形成一个单词。以下两种写法都没问题。
+
+```bash
+let i=2+2
+let "i = 2 + 2"
+```
+
+`$(( )) `语法就宽松多了，它允许各种空白字符出现在双括号内。这种写法不易出错，代码的可读性也要好得多，是我们执行 bash 整数运算时的首选方式。
+
+#### 6.4 解析命令行参数
+
+getopts 的设计目标是在循环中运行，每次执行循环，getopts 就检查下一个命令行参数，并判断它是否合法。即检查参数是否以` -` 开头，后面跟一个包含在 options 中的字母。如果是，就把匹配的选项字母存在指定的变量 variable 中，并返回退出状态0；如果` -` 后面的字母没有包含在 options 中，就在 variable 中存入一个 ？，并返回退出状态0；如果命令行中已经没有参数，或者下一个参数不以`-`开头，就返回不为0的退出状态。
+
+**getopts引用的三个环境变量：**
+
+- **OPTARG**: 上一个由getopts内置命令处理的选项参数的值， option argument（存放选项参数），当选项需要选项参数时，getopts 命令就将其置于变量 OPTARG 中
+
+- **OPTIND**:  下一个由getopts内置命令处理的参数的序号，option index，每次调用脚本它都会被初始值为1，会逐次递增。
+
+- **OPTERR**: 如果设为1，bash会显示getopts的错误。设为0,不显示getopts的错误。
+
+**getopts 的处理过程：**
+　　调用脚本时，OPTIND为初始化为1。每调用一次getopts，就将下一个选项值赋给name , 选项索引值OPTIND也会指向下一个要处理选项的位置，选项参数则会赋给OPTARG
+　　getopts 的设计目标是在循环中运行，每执行一次，getopts就检查下一个命令行参数，并判断它是否有效。（即检查参数是否以-开头，后面跟一个包含在opstring中的字母）。
+　　有效，则把匹配的选项字母存在指定的变量variable中，并返回退出状态0（ture）；
+　　无效(如果-后面的字母没有包含在options)，就在 variable 中存入一个？，并返回退出状态0；如果命令行中已经没有参数，或者下一个参数不以-开头，就返回不为0的退出状态(false, 可用于结束while 循环)。
+　getopts处理完所有参数后，会返回一个非0值（false,退出循环），此时OPTIND索引值指向第一个非选项的参数[args],name置为?
+
+**getopts 错误处理**
+　　正确使用命令时，name用来存储option, $OPTARG用来存放option的参数。若命令输入有误（选项无效，缺少参数），getopts会处理illegal option错误和miss option argument错误。处理结果与opstring是否以：开头而不同。opstring 开头的：用于屏蔽getopts处理时的错误消息（脚本中将OPTERR置于0也可以达到同样的效果）。
+
+```bash
+#!/bin/bash
+while getopts u:p:n option
+do 
+    case "$option" in
+        u)
+            echo "option:u, value $OPTARG"
+            echo "next arg index:$OPTIND";;
+        p)
+            echo "option:p"
+            passwd=$OPTARG
+            echo "next arg index:$OPTIND"
+            echo "PASSWD IS: $passwd";;
+        n)
+            echo "option:N"
+            echo "next arg index:$OPTIND";;
+        \?)
+            echo "Usage: args [-U] [-p] [-n]"
+            echo "-u means uses"
+            echo "-p means passwd"
+            echo "-n means name"
+            exit 1;;
+    esac
+done
+```
+
+注：
+
+1.getopts 允许把选项堆叠在一起（如 -ms）
+
+2.如要带参数，须在对应选项后加 :（如h后需加参数 h:ms）。此时选项和参数之间至少有一个空白字符分隔，这样的选项不能堆叠。
+
+3.如果在需要参数的选项之后没有找到参数，它就在给定的变量中存入 **?** ，并向标准错误中写入错误消息。否则将实际参数写入特殊变量 ：**OPTARG**
+
+4.另外一个特殊变量：**OPTIND**，反映下一个要处理的参数索引，初值是 1，每次执行 getopts 时都会更新。
