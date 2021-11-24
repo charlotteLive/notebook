@@ -236,11 +236,92 @@ add_subdirectory(subbinary)
 
 
 
+### 6. 获取Git库版本信息
+
+#### Git相关命令
+
+获取commit hash值：`git log -1 --pretty=format:%H`
+
+获取当前的Tag：`git describe --abbrev=6 --dirty --always --tags`
+
+#### cmake脚本
+
+```cmake
+find_package(Git)
+set(GIT_REPO_VERSION "git not found")
+set(GIT_REPO_DATE "git not found")
+set(GIT_REPO_HASH "git not found")
+if(GIT_FOUND)
+    # 获取当前版本的Tag
+    execute_process(COMMAND ${GIT_EXECUTABLE} describe --abbrev=6 --dirty --always --tags
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE  GIT_REPO_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    # 获取最新 commit 日期，YYYY-MM-DD
+    execute_process(COMMAND ${GIT_EXECUTABLE} log -1 --format=%cd --date=short
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE  GIT_REPO_DATE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    # 获取最新 commit Hash
+    execute_process(COMMAND ${GIT_EXECUTABLE} log -1 --format=%H
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE  GIT_REPO_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    message(STATUS "Git version is ${GIT_REPO_VERSION}: ${GIT_REPO_DATE} : ${GIT_REPO_HASH}")
+endif(GIT_FOUND)
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/ver.h.ini
+  ${CMAKE_BINARY_DIR}/gen/ver.h
+  @ONLY
+)
+
+include_directories(${CMAKE_BINARY_DIR}/gen)
+```
+
+#### 配置文件
+
+建立一个配置文件ver.h.ini.此处放在CMakeLists.txt目录下。
+
+```c++
+#ifndef _GIT_VER_
+#define _GIT_VER_
+
+#define GIT_REPO_TAG "@GIT_REPO_VERSION@"
+#define GIT_REPO_DATE "@GIT_REPO_DATE@"
+#define GIT_REPO_HASH "@GIT_REPO_HASH@"
+
+#endif
+```
+
+cmake的configure_file命令会根据输入的配置文件，替换对应的变量，生成输出文件。
+
+#### 使用生成的头文件
+
+因为我们已经使用include_directories包含了ver.h的目录，后面直接include头文件就好。
+
+```c++
+#include <stdio.h>
+#include "ver.h"
+
+int main(int argc, char** argv)
+{
+    printf("version: %s\n", GIT_REPO_TAG);
+    printf("date: %s\n", GIT_REPO_DATE);
+    printf("hash: %s\n", GIT_REPO_HASH);
+    return 0;
+}
+```
 
 
-### 6. 附录
 
-#### 6.1 target_include_directories、include_directories的区别
+### 7. 附录
+
+#### 7.1 target_include_directories、include_directories的区别
 
 include_directories的影响范围最大，可以为CMakelists.txt后的所有项目添加头文件目录，一般写在最外层CMakelists.txt中影响全局。
 
@@ -255,7 +336,7 @@ target_include_directories(myLib PRIVATE ${OpenCV_Include_dir})
 
 `link_directories`和`target_link_directories`同理。
 
-#### 6.2 设置编译选项的讲究
+#### 7.2 设置编译选项的讲究
 
 在cmake脚本中，设置编译选项可以通过`add_compile_options`命令，也可以通过set命令修改`CMAKE_CXX_FLAGS`或`CMAKE_C_FLAGS`。
 
