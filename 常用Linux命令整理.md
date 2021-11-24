@@ -1,6 +1,6 @@
 ## 常用Linux命令整理
 
-## 1. 常用命令拾遗
+### 1. 常用命令拾遗
 
 which，查看程序的binary文件所在路径：
 
@@ -379,3 +379,25 @@ $ command > /dev/null 2>&1
 > **注意：**0 是标准输入（STDIN），1 是标准输出（STDOUT），2 是标准错误输出（STDERR）。
 >
 > 这里的 **2** 和 **>** 之间不可以有空格，**2>** 是一体的时候才表示错误输出。
+
+### dpkg
+
+安装：`dpkg -i xxx.deb`
+
+查询：`dpkg -l`
+
+卸载：`dpkg -r lyndriver`
+
+
+
+gcc -v -E -x C++列出所需头文件路径
+
+
+
+sudo免密码的方法：
+
+```sh
+vim /etc/sudoers
+#在最后一行输入 your_user_name ALL=(ALL) NOPASSWD: ALL
+```
+
