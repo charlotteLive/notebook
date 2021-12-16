@@ -87,7 +87,7 @@ set(<variable> <value>
 set(var "value")
 ```
 
-设置一个普通变量var，值为value，引号的作用可以详见我的另一篇文章。
+设置一个普通变量var，值为value。
 
 和编程语言中局部变量的用法类似，这个变量会屏蔽CMake缓存中的同名变量，（类似局部变量屏蔽全局变量）。但是这条语句不会改变缓存中的var变量。
 
@@ -116,8 +116,34 @@ CACHE作用如下：
 - 读取环境变量：`$ENV{...}`
 - 设置环境变量：`set(ENV{...} ...)`
 
+```cmake
+MESSAGE(STATUS “HOME dir: $ENV{HOME}”)
+```
 
-#### 2.4 总结
+#### 2.4 cmake常用变量
+
+-  EXECUTABLE_OUTPUT_PATH ：指定可执行文件的生成位置。
+
+- LIBRARY_OUTPUT_PATH ：指定库文件的生成位置。
+
+- CMAKE_BINARY_DIR和PROJECT_BINARY_DIR ：工程编译发生的目录。
+
+- CMAKE_SOURCE_DIR和PROJECT_SOURCE_DIR ：工程顶层目录。
+
+- CMAKE_CURRENT_SOURCE_DIR ：当前处理的 CMakeLists.txt 所在的路径。
+
+- CMAKE_CURRRENT_BINARY_DIR ：如果是 in-source 编译，它跟 CMAKE_CURRENT_SOURCE_DIR 一致，如果是 out-of-source 编译，他指的是 target 编译目录。
+
+- CMAKE_MODULE_PATH ：用来定义自己的 cmake 模块所在的路径。如果你的工程比较复杂，有可能会自己编写一些 cmake 模块，这些 cmake 模块是随你的工程发布的，为了让 cmake 在处理CMakeLists.txt 时找到这些模块，你需要通过 SET 指令，将自己的 cmake 模块路径设置一下。这时候你就可以通过 INCLUDE 指令来调用自己的模块了。
+
+  ```cmake
+  SET(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+  ```
+
+- PROJECT_NAME ：返回通过 PROJECT 指令定义的项目名称。
+
+
+#### 2.5 总结
 
 正常使用的时候，如果有多层CMakeLists.txt，需要跨文本的变量，应该使用CACHE类型，如果只是当前文本的变量，则不需要使用CACHE，更重要的是，应该避免使用同名的普通和缓存变量。另外，由于CMake没有有效的清除缓存的方法，如果要彻底清除缓存，需要删除build或者release文件夹的所有文件。
 
@@ -131,8 +157,6 @@ link_directories(path_to_OpenBLAS/lib/) # .a文件的路径
 add_executable(Test_lib library.c)
 target_link_libraries(Test_lib libopenblas.a)
 ```
-
-
 
 #### 3.2 方法二：使用find_package自动查找库文件和头文件的路径
 
@@ -215,6 +239,10 @@ find_library(var NAMES name1 PATHS path [REQUIRED] [NO_DEFUALT_PATH])
 
 还有其他的关键字，可以查看官方的说明文档。
 
+#### 3.4 编写自己的find模块文件
+
+
+
 ### 4. 多层次cmake
 
 CMakeLists.txt文件可以通过`add_subdirectory`包含和调用包含CMakeLists.txt文件的子目录。
@@ -232,11 +260,165 @@ add_subdirectory(subbinary)
 - PROJECT_SOURCE_DIR：当前项目的源文件目录；
 - PROJECT_BINARY_DIR：当前项目的构建目录。
 
-### 5. 代码生成
+
+
+### 5. 项目安装（install）
 
 
 
-### 6. 获取Git库版本信息
+### 6. 代码生成
+
+代码生成是一个非常有用的功能，它可以使用一份公共的描述文件，生成不同语言下的源代码。这个功能使得需要人工编写的代码大幅减少，同时也增加了互操作性。
+
+我们通过两个示例来展示如何使用CMake变量和其他常用的工具进行代码生成。
+
+#### 6.1 configure-file
+
+在CMake中，我们可以使用`configure-file()`函数进行文件中变量的替换，其输入参数为源文件和目标文件。
+
+```cmake
+configure_file(ver.h.in ${PROJECT_BINARY_DIR}/ver.h)
+configure_file(path.h.in ${PROJECT_BINARY_DIR}/path.h @ONLY)
+```
+
+```c++
+// ver.h.in
+#ifndef __VER_H__
+#define __VER_H__
+
+// version variable that will be substituted by cmake
+// This shows an example using the $ variable type
+const char* ver = "${cf_example_VERSION}";
+
+#endif
+```
+
+```c++
+// path.h.in
+#ifndef __PATH_H__
+#define __PATH_H__
+
+// version variable that will be substituted by cmake
+// This shows an example using the @ variable type
+const char* path = "@CMAKE_SOURCE_DIR@";
+
+#endif
+```
+
+第一个例子，在`ver.h.in`文件中，CMake可以将使用 `${}` 或 `@@` 的语法来定义一个CMake变量。在执行代码生成之后，在 `PROJECT_BINARY_DIR` 目录下将会出现一个新的ver.h文件。
+
+第二个例子，在`path.h.in`文件中，`@ONLY` 指定了它只能用 `@@` 的语法来定义一个CMake变量。同样地，在执行代码生成之后，在 `PROJECT_BINARY_DIR` 目录下将会出现一个新的path.h文件。
+
+在程序中，我们只需要包含生成的头文件，就能使用文件中定义的变量或宏了。
+
+```c++
+#include <iostream>
+#include "ver.h"
+#include "path.h"
+
+int main(int argc, char *argv[])
+{
+    std::cout << "Hello Version " << ver << "!" << std::endl;
+    std::cout << "Path is " << path << std::endl;
+    return 0;
+}
+```
+
+完整的Cmake文件见链接：[cmake-examples/CMakeLists.txt](https://github.com/ttroy50/cmake-examples/blob/master/03-code-generation/configure-files/CMakeLists.txt)
+
+#### 6.2 使用Protobuf的代码生成
+
+Protocol Buffers 是一种由谷歌提出的数据序列化的格式。用户可以提供一个描述了数据的 `.proto` 格式的文件，通过protobuf编译器，文件可以被编译成包括C++在内的一系列编程语言的源码文件。
+
+本示例要求预安装protocol buffers的二进制文件和库文件，在Ubuntu系统中，可以使用下述命令安装：
+
+```sh
+sudo apt-get install protobuf-compiler libprotobuf-dev
+```
+
+CMake中，使用`find_package()`命令查找并导入protobuf包，这样我们可以使用以下变量获取protobuf的信息：
+
+- `PROTOBUF_FOUND` - Protocol Buffers是否安装
+- `PROTOBUF_INCLUDE_DIRS` - protobuf头文件路径
+- `PROTOBUF_LIBRARIES` - protobuf库文件路径
+
+CMake protobuf包中的`PROTOBUF_GENERATE_CPP`可以帮我们简化源代码生成流程：
+
+```cmake
+PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS AddressBook.proto)
+```
+
+PROTO_SRC和OTO_HARS变量分别指代生成的cpp和h文件并可用于连接到target和设置include。
+
+当`.proto`文件被改变时，与其相关联的源代码文件也将被自动重新生成；如果`.proto`文件没有发生修改，重新执行 `make` 命令，并不会重新生成。
+
+完整的Cmake文件见链接：[cmake-examples/CMakeLists.txt](https://github.com/ttroy50/cmake-examples/blob/master/03-code-generation/protobuf/CMakeLists.txt)
+
+#### 6.3 通用的代码生成方法
+
+我们可以使用`add_custom_target`和`add_custom_command`命令来定制自己的代码生成命令。这里还是以protobuf举例，但不会使用CMake protobuf包中相关命令。
+
+```cmake
+find_package(Protobuf)
+
+#获取需要编译的proto文件
+file(GLOB_RECURSE MSG_PROTOS ${CMAKE_SOURCE_DIR}/*.proto)
+set(MESSAGE_SRC "")
+set(MESSAGE_HDRS "")
+
+foreach(msg ${MSG_PROTOS})
+    get_filename_component(FIL_WE ${msg} NAME_WE)
+
+    list(APPEND MESSAGE_SRC "${PROJECT_BINARY_DIR}/${FIL_WE}.pb.cc")
+    list(APPEND MESSAGE_HDRS "${PROJECT_BINARY_DIR}/${FIL_WE}.pb.h")
+
+    # 使用自定义命令
+    add_custom_command(
+        OUTPUT "${PROJECT_BINARY_DIR}/${FIL_WE}.pb.cc"
+        "${PROJECT_BINARY_DIR}/${FIL_WE}.pb.h"
+        COMMAND  ${PROTOBUF_PROTOC_EXECUTABLE}
+        ARGS --cpp_out  ${PROTO_META_BASE_DIR}
+        -I ${CMAKE_BINARY_DIR}
+        ${msg}
+        DEPENDS ${msg}
+        COMMENT "Running C++ protocol buffer compiler on ${msg}"
+        VERBATIM
+    )
+endforeach()
+
+# 设置文件属性为 GENERATED
+set_source_files_properties(${MESSAGE_SRC} ${MESSAGE_HDRS} PROPERTIES GENERATED TRUE)
+
+# 添加自定义target
+add_custom_target(generate_message ALL
+                DEPENDS ${MESSAGE_SRC} ${MESSAGE_HDRS}
+                COMMENT "generate message target"
+                VERBATIM
+                )
+                
+# Add an executable
+add_executable(protobuf_example main.cpp ${MESSAGE_SRC} ${MESSAGE_HDRS})
+
+add_dependencies(protobuf_example generate_message)
+
+target_include_directories(protobuf_example
+    PUBLIC
+    ${PROTOBUF_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+# link the exe against the libraries
+target_link_libraries(protobuf_example PUBLIC ${PROTOBUF_LIBRARIES})
+```
+
+我们通过`add_custom_command`命令说明了proto描述文件有变化时，运行命令输出生成proto头文件和源文件。在通过`add_custom_target`命令定义generate_message目标，它的运行依赖于生成文件的变化。最后再使用`add_dependencies`定义依赖生成文件的目标，这样就能够在运行protobuf_example目标前，先检查并运行generate_message。
+
+需要注意的几点：
+
+- 设置生成的源码文件属性GENERATED为TRUE,否则cmake时会因找不到源码而报错
+- 使用**add_custom_target**添加目标时要设置ALL关键字,否则target将不在默认编译列表中
+
+### 7. 获取Git库版本信息
 
 #### Git相关命令
 
@@ -317,11 +499,37 @@ int main(int argc, char** argv)
 }
 ```
 
+### 8. 动态库添加版本号
+
+按照规则，动态库是应该包含一个版本号的，我们可以看一下系统的动态库，一般情况是：
+
+```
+libhello.so.1.2
+libhello.so -> libhello.so.1
+libhello.so.1 -> libhello.so.1.2
+```
+
+为了实现动态库版本号，我们可以使用 SET_TARGET_PROPERTIES 指令。
+具体使用方法如下：
+
+```cmake
+SET_TARGET_PROPERTIES(hello PROPERTIES VERSION 1.2 SOVERSION 1)
+```
+
+VERSION 指代动态库版本，SOVERSION 指代 API 版本。
+将上述指令加入 lib/CMakeLists.txt 中，重新构建看看结果，在指定的库生成目录会生成：
+
+```
+libhello.so.1.2
+libhello.so.1->libhello.so.1.2
+libhello.so ->libhello.so.1
+```
 
 
-### 7. 附录
 
-#### 7.1 target_include_directories、include_directories的区别
+### 附录
+
+#### 1) target_include_directories、include_directories的区别
 
 include_directories的影响范围最大，可以为CMakelists.txt后的所有项目添加头文件目录，一般写在最外层CMakelists.txt中影响全局。
 
@@ -336,7 +544,7 @@ target_include_directories(myLib PRIVATE ${OpenCV_Include_dir})
 
 `link_directories`和`target_link_directories`同理。
 
-#### 7.2 设置编译选项的讲究
+#### 2) 设置编译选项的讲究
 
 在cmake脚本中，设置编译选项可以通过`add_compile_options`命令，也可以通过set命令修改`CMAKE_CXX_FLAGS`或`CMAKE_C_FLAGS`。
 
@@ -362,5 +570,166 @@ if (TEST_DEBUG)
 endif(TEST_DEBUG)
 ```
 
+#### 3) add_dependencies
 
+定义 target 依赖的其他 target ,确保在编译本 target 之前,其他的 target 已经被构建。
+
+```cmake
+add_dependencies(target-name depend-target1 depend-target2 ...)
+```
+
+#### 4) add_test
+
+**ENABLE_TESTING**
+指令用来控制 Makefile 是否构建 test 目标,涉及工程所有目录。语法很简单,没有任何参数, ENABLE_TESTING() ,一般情况这个指令放在工程的主CMakeLists.txt 中 .
+
+**ADD_TEST **
+
+```
+ADD_TEST(testname Exename arg1 arg2 ...)
+```
+
+- testname 是自定义的 test 名称,
+- Exename 可以是构建的目标文件也可以是外部脚本等等。
+- 后面连接传递给可执行文件的参数。如果没有在同一个 CMakeLists.txt 中打开ENABLE_TESTING() 指令,任何 ADD_TEST 都是无效的。
+  比如我们前面的 Helloworld 栗子,可以在工程主 CMakeLists.txt 中添加
+
+```
+ADD_TEST(mytest ${PROJECT_BINARY_DIR}/bin/main)
+ENABLE_TESTING()
+```
+
+生成 Makefile 后,就可以运行 make test 来执行测试了。
+
+#### 5) file指令
+
+文件操作指令,基本语法为 :
+
+```cmake
+FILE(WRITE filename "message to write"... )
+FILE(APPEND filename "message to write"... )
+FILE(READ filename variable)
+FILE(GLOB variable [RELATIVE path] [globbingexpressions]...)
+FILE(GLOB_RECURSE variable [RELATIVE path] [globbing expressions]...)
+FILE(REMOVE [directory]...)
+FILE(REMOVE_RECURSE [directory]...)
+FILE(MAKE_DIRECTORY [directory]...)
+FILE(RELATIVE_PATH variable directory file)
+FILE(TO_CMAKE_PATH path result)
+FILE(TO_NATIVE_PATH path result)
+```
+
+这里的语法都比较简单,不在展开介绍了。
+
+#### 6) foreach
+
+FOREACH 指令的使用方法有三种形式:
+
+#### 1) 列表
+
+```cmake
+FOREACH(loop_var arg1 arg2 ...)
+COMMAND1(ARGS ...)
+COMMAND2(ARGS ...)
+...
+ENDFOREACH(loop_var)
+```
+
+像我们前面使用的 AUX_SOURCE_DIRECTORY 的栗子
+
+```cmake
+AUX_SOURCE_DIRECTORY(. SRC_LIST)
+FOREACH(F ${SRC_LIST})
+MESSAGE(${F})
+ENDFOREACH(F)
+```
+
+#### 2 )范围
+
+```cmake
+FOREACH(loop_var RANGE total)
+ENDFOREACH(loop_var)从 0 到 total 以1为步进
+```
+
+举例如下:
+
+```cmake
+FOREACH(VAR RANGE 10)
+MESSAGE(${VAR})
+ENDFOREACH(VAR)
+```
+
+最终得到的输出是:
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+#### 3)范围和步进
+
+```cmake
+FOREACH(loop_var RANGE start stop [step])
+ENDFOREACH(loop_var)
+```
+
+从 start 开始到 stop 结束,以 step 为步进,
+举例如下
+
+```cmake
+FOREACH(A RANGE 5 15 3)
+MESSAGE(${A})
+ENDFOREACH(A)
+```
+
+最终得到的结果是:
+5
+8
+11
+14
+注：整个FOREACH遇到 ENDFOREACH 指令,整个语句块才会得到真正的执行。
+
+#### 7) macro
+
+宏定义如下：
+
+```cmake
+macro(<name> [arg1 [arg2 [arg3 ...]]])
+  COMMAND1(ARGS ...)
+  COMMAND2(ARGS ...)
+  ...
+endmacro(<name>)
+```
+
+- <name><name>为函数名字
+- arg1、arg2...为函数参数
+
+举个栗子：
+
+```cmake
+set(var "ABC")
+
+macro(Moo arg)
+  message("arg = ${arg}")
+  set(arg "abc")
+  message("# After change the value of arg.")
+  message("arg = ${arg}")
+endmacro()
+message("=== Call macro ===")
+Moo(${var})
+
+#输出如下：
+=== Call macro ===
+arg = ABC
+# After change the value of arg.
+arg = ABC
+```
+
+这里的宏是做了字符串的替换
 

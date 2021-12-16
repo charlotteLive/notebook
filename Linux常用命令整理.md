@@ -397,6 +397,7 @@ gcc -v -E -x C++列出所需头文件路径
 sudo免密码的方法：
 
 ```sh
+# 切换到root用户后
 vim /etc/sudoers
 #在最后一行输入 your_user_name ALL=(ALL) NOPASSWD: ALL
 ```
