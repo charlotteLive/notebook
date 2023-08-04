@@ -41,6 +41,27 @@ print(sizeof(p), repr(p.raw))  # 10 b'Hi\x00lo\x00\x00\x00\x00\x00'
 
 ### 2. 加载动态链接库
 
+使用ctypes的cdll对象可以加载动态链接库，在windows系统中，还可以使用windll和oledll对象加载动态库。
+
+cdll可以载入按标准的cdecl调用协议导出的函数。示例如下：
+
+```python
+from ctypes import *
+from platform import *
+
+cdll_names = {
+            'Darwin' : 'libc.dylib',
+            'Linux'  : 'libc.so.6',
+            'Windows': 'msvcrt.dll'
+        }
+
+clib = cdll.LoadLibrary(cdll_names[system()])
+s1 = c_char_p(b'a')
+s2 = c_char_p(b'b')
+s3 = clib.strcat(s1,s2)
+print(s1.value) #ab
+```
+
 
 ### 3. 函数调用
 
